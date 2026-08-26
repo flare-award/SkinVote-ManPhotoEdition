@@ -1,22 +1,22 @@
-// Единый источник правды для категорий оценки.
+// Единый источник правды для категорий оценки фото.
 // Карточки рейтинга, сортировка таблицы лидеров, фильтры, шапка таблицы,
 // разбивка в детальном просмотре, экспорт и импорт — всё строится отсюда,
 // поэтому для добавления/переименования категории правится только этот файл
 // (цвета задаются в css/app.css по ключу категории).
 
 export const CATEGORIES = [
-  { key: "hair", label: "Волосы" },
-  { key: "eyes", label: "Глаза" },
-  { key: "face", label: "Лицо" },
-  { key: "skinShading", label: "Шейдинг кожи" },
-  { key: "topClothes", label: "Одежда сверху" },
-  { key: "bottomClothes", label: "Одежда снизу" },
-  { key: "shoes", label: "Обувь" },
+  { key: "composition", label: "Композиция" },
+  { key: "lighting", label: "Свет" },
+  { key: "color", label: "Цвет" },
+  { key: "sharpness", label: "Резкость" },
+  { key: "detail", label: "Детализация" },
+  { key: "emotion", label: "Эмоция" },
+  { key: "atmosphere", label: "Атмосфера" },
 ];
 
 export const CATEGORY_KEYS = CATEGORIES.map((cat) => cat.key);
 
-// Пустой набор оценок: у нового скина каждая категория ещё не оценена.
+// Пустой набор оценок: у нового фото каждая категория ещё не оценена.
 export function emptyRatings(value = null) {
   return Object.fromEntries(CATEGORY_KEYS.map((key) => [key, value]));
 }
@@ -36,7 +36,7 @@ export function pluralCategories(n) {
   return "категорий";
 }
 
-// Ключ -> css-класс/id в kebab-case (например, skinShading -> skin-shading).
+// Ключ -> css-класс/id в kebab-case (например, topClothes -> top-clothes).
 export function categorySlug(key) {
   return String(key).replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
 }

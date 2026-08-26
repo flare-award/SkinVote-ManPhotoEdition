@@ -1,16 +1,17 @@
 import {
   collectFromDataTransfer,
   filesFromInput,
-  inspectSkinFile,
+  inspectPhotoFile,
+  isImageFile,
   pickFilesWithFs,
   pickFolderWithFs,
-  revealSkin,
-  revokeSkin,
+  revealPhoto,
+  revokePhoto,
   shuffle,
   supportsDirPicker,
   supportsFsAccess,
 } from "./files.js";
-import { captureThumb, createAttachedViewer, disposeThumbEngine, thumbPlaceholder } from "./viewer.js";
+import { captureThumb, createPhotoViewer, disposeThumbEngine, thumbPlaceholder } from "./viewer.js";
 import {
   CATEGORIES,
   CATEGORY_KEYS,
@@ -25,14 +26,14 @@ function zeroFilters() {
 }
 
 const state = {
-  skins: [],
+  photos: [],
   rejected: [],
   skipped: 0,
   order: [],
   index: 0,
   screen: "upload",
   sortKey: "total",
-  // Результат тейбрейкера: Map(skinId -> rank внутри группы ничьих), либо null,
+  // Результат тейбрейкера: Map(photoId -> rank внутри группы ничьих), либо null,
   // если тейбрейкер ещё не проводился (или был сброшен после изменения оценок).
   tiebreak: null,
   // Признак того, что данные загружены из JSON, а не оценены в этой сессии.
@@ -69,14 +70,17 @@ const els = {
   inputFolder: document.getElementById("input-folder"),
   inputImport: document.getElementById("input-import"),
   currentName: document.getElementById("current-name"),
+  rateStage: document.getElementById("rate-stage"),
   rateProgress: document.getElementById("rate-progress"),
   categories: document.getElementById("categories"),
   totalValue: document.getElementById("total-value"),
   btnPrev: document.getElementById("btn-prev"),
   btnNext: document.getElementById("btn-next"),
   btnSkip: document.getElementById("btn-skip"),
-  btnSlim: document.getElementById("btn-slim"),
-  btnWide: document.getElementById("btn-wide"),
+  btnZoomIn: document.getElementById("btn-zoom-in"),
+  btnZoomOut: document.getElementById("btn-zoom-out"),
+  btnZoomFit: document.getElementById("btn-zoom-fit"),
+  zoomLevel: document.getElementById("zoom-level"),
   topbarMeta: document.getElementById("topbar-meta"),
   podium: document.getElementById("podium"),
   lbBody: document.getElementById("lb-body"),
@@ -112,7 +116,6 @@ const els = {
   // Detail viewer
   detailDialog: document.getElementById("detail-dialog"),
   detailStage: document.getElementById("detail-stage"),
-  detailCanvas: document.getElementById("detail-canvas"),
   detailPlaceholder: document.getElementById("detail-placeholder"),
   detailName: document.getElementById("detail-name"),
   detailScore: document.getElementById("detail-score"),
@@ -122,15 +125,13 @@ const els = {
 let rateHandle = null;
 // key категории -> select фильтра «минимум по категории».
 const categoryFilterSelects = new Map();
-const podiumHandles = [];
-let podiumRenderToken = 0;
 let toastTimer = 0;
 let detailHandle = null;
-let detailSkin = null;
+let detailPhoto = null;
 let detailRenderToken = 0;
 
-// Tiebreaker: два переиспользуемых вьюера (левый/правый) — всего 2 WebGL-контекста
-// на весь экран тейбрейкера, освобождаются после разрешения всех ничьих.
+// Tiebreaker: два переиспользуемых вьюера (левый/правый) на весь экран тейбрейкера,
+// освобождаются после разрешения всех ничьих.
 const tiebreakHandles = [];
 let tiebreakChoiceResolve = null;
 let tiebreakAborted = false;
@@ -138,9 +139,9 @@ let tiebreakCompareCount = 0;
 let tiebreakGroupLabel = "";
 let pendingImport = null;
 
-function currentSkin() {
+function currentPhoto() {
   const id = state.order[state.index];
-  return state.skins.find((s) => s.id === id) || null;
+  return state.photos.find((p) => p.id === id) || null;
 }
 
 function average(ratings) {
@@ -170,33 +171,45 @@ function setScreen(name) {
     node.hidden = !active;
     node.classList.toggle("is-active", active);
   }
-  if (name === "upload") els.topbarMeta.textContent = "Загрузка пака";
+  if (name === "upload") els.topbarMeta.textContent = "Загрузка фото";
 }
 
-function pluralSkins(n) {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return `${n} валидный скин`;
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return `${n} валидных скина`;
-  return `${n} валидных скинов`;
+function pluralPhotos(n) {
+  // «Фото» — несгибаемое: 1 фото, 2 фото, 5 фото.
+  return `${n} фото`;
 }
 
 function renderUpload() {
-  const hasAny = state.skins.length || state.rejected.length;
+  const hasAny = state.photos.length || state.rejected.length;
   els.summary.hidden = !hasAny;
-  els.validCount.textContent = `Найдено ${pluralSkins(state.skins.length)}`;
+  els.validCount.textContent = `Найдено ${pluralPhotos(state.photos.length)}`;
   const extra = [];
   if (state.skipped) extra.push(`пропущено файлов: ${state.skipped}`);
   if (state.rejected.length) extra.push(`ошибочных: ${state.rejected.length}`);
   els.skipCount.textContent = extra.join(" · ");
 
   els.validList.replaceChildren(
-    ...state.skins.map((skin) => {
+    ...state.photos.map((photo) => {
       const chip = document.createElement("div");
       chip.className = "chip";
-      chip.innerHTML = `<span title="${escapeAttr(skin.relativePath)}"></span><button type="button" aria-label="Убрать">×</button>`;
-      chip.querySelector("span").textContent = skin.name;
-      chip.querySelector("button").addEventListener("click", () => removeSkin(skin.id));
+
+      const thumb = document.createElement("img");
+      thumb.className = "chip-thumb";
+      thumb.src = photo.url;
+      thumb.alt = "";
+      thumb.decoding = "async";
+
+      const label = document.createElement("span");
+      label.textContent = photo.name;
+      label.title = photo.relativePath;
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.setAttribute("aria-label", "Убрать");
+      remove.textContent = "×";
+      remove.addEventListener("click", () => removePhoto(photo.id));
+
+      chip.append(thumb, label, remove);
       return chip;
     }),
   );
@@ -217,24 +230,24 @@ function renderUpload() {
     }),
   );
 
-  els.btnStart.disabled = state.skins.length === 0;
+  els.btnStart.disabled = state.photos.length === 0;
 }
 
 function escapeAttr(value) {
   return String(value).replace(/"/g, "&quot;");
 }
 
-function removeSkin(id) {
-  const idx = state.skins.findIndex((s) => s.id === id);
+function removePhoto(id) {
+  const idx = state.photos.findIndex((p) => p.id === id);
   if (idx === -1) return;
-  revokeSkin(state.skins[idx]);
-  state.skins.splice(idx, 1);
+  revokePhoto(state.photos[idx]);
+  state.photos.splice(idx, 1);
   renderUpload();
 }
 
 function clearAll() {
-  state.skins.forEach(revokeSkin);
-  state.skins = [];
+  state.photos.forEach(revokePhoto);
+  state.photos = [];
   state.rejected = [];
   state.skipped = 0;
   renderUpload();
@@ -248,20 +261,20 @@ async function ingestEntries(entries) {
 
   let added = 0;
   for (const entry of entries) {
-    if (entry.file && !/\.png$/i.test(entry.file.name) && entry.file.type !== "image/png") {
+    if (entry.file && !isImageFile(entry.file)) {
       state.skipped += 1;
       continue;
     }
-    const result = await inspectSkinFile(entry);
+    const result = await inspectPhotoFile(entry);
     if (result.ok) {
-      const dup = state.skins.some(
-        (s) => s.relativePath === result.skin.relativePath && s.file.size === result.skin.file.size,
+      const dup = state.photos.some(
+        (p) => p.relativePath === result.photo.relativePath && p.file.size === result.photo.file.size,
       );
       if (dup) {
-        revokeSkin(result.skin);
+        revokePhoto(result.photo);
         continue;
       }
-      state.skins.push(result.skin);
+      state.photos.push(result.photo);
       added += 1;
     } else {
       state.rejected.push(result);
@@ -269,7 +282,7 @@ async function ingestEntries(entries) {
   }
 
   renderUpload();
-  if (added) showToast(`Добавлено скинов: ${added}`);
+  if (added) showToast(`Добавлено фото: ${added}`);
 }
 
 function buildCategories() {
@@ -301,16 +314,16 @@ function buildCategories() {
         paintStars(row, Number(btn.dataset.v), true);
       });
       row.addEventListener("pointerleave", () => {
-        const skin = currentSkin();
-        paintStars(row, skin?.ratings[cat.key], false);
+        const photo = currentPhoto();
+        paintStars(row, photo?.ratings[cat.key], false);
       });
       row.addEventListener("click", (event) => {
         const btn = event.target.closest(".star");
         if (!btn) return;
-        const skin = currentSkin();
-        if (!skin) return;
-        skin.ratings[cat.key] = Number(btn.dataset.v);
-        skin.skipped = false;
+        const photo = currentPhoto();
+        if (!photo) return;
+        photo.ratings[cat.key] = Number(btn.dataset.v);
+        photo.skipped = false;
         invalidateTiebreak();
         refreshRatePanel();
       });
@@ -379,9 +392,9 @@ function buildCategoryFilters() {
   els.categoryFilters.replaceChildren(fragment);
 }
 
-// Шапка таблицы лидеров: Место / Скин / Итог / категории… / действия.
+// Шапка таблицы лидеров: Место / Фото / Итог / категории… / действия.
 function buildTableHead() {
-  const labels = ["Место", "Скин", "Итог", ...CATEGORIES.map((cat) => cat.label), ""];
+  const labels = ["Место", "Фото", "Итог", ...CATEGORIES.map((cat) => cat.label), ""];
   els.lbHead.replaceChildren(
     ...labels.map((text) => {
       const th = document.createElement("th");
@@ -392,11 +405,11 @@ function buildTableHead() {
 }
 
 function refreshRatePanel() {
-  const skin = currentSkin();
-  if (!skin) return;
-  const score = average(skin.ratings);
+  const photo = currentPhoto();
+  if (!photo) return;
+  const score = average(photo.ratings);
   const totalScore = document.getElementById("total-score");
-  if (skin.skipped) {
+  if (photo.skipped) {
     els.totalValue.textContent = "Skipped";
     totalScore.classList.add("is-skipped");
   } else {
@@ -405,124 +418,115 @@ function refreshRatePanel() {
   }
   els.categories.querySelectorAll(".cat").forEach((card) => {
     const key = card.dataset.key;
-    const value = skin.ratings[key];
+    const value = photo.ratings[key];
     card.querySelector("[data-val]").textContent = value == null ? "—" : value;
     paintStars(card.querySelector(".stars"), value, false);
   });
 
-  const complete = CATEGORIES.every((c) => skin.ratings[c.key] != null);
-  const canProceed = complete || skin.skipped;
+  const complete = CATEGORIES.every((c) => photo.ratings[c.key] != null);
+  const canProceed = complete || photo.skipped;
   els.btnNext.disabled = !canProceed;
   els.btnNext.textContent = state.index === state.order.length - 1 ? "К таблице лидеров" : "Следующий";
   els.btnPrev.disabled = state.index === 0;
-  els.rateProgress.textContent = `Скин ${state.index + 1} из ${state.order.length}`;
-  els.currentName.textContent = skin.name;
-  els.currentName.title = skin.relativePath;
-  els.btnSlim.classList.toggle("is-active", skin.model === "slim");
-  els.btnWide.classList.toggle("is-active", skin.model === "wide");
+  els.rateProgress.textContent = `Фото ${state.index + 1} из ${state.order.length}`;
+  els.currentName.textContent = photo.name;
+  els.currentName.title = photo.relativePath;
   els.topbarMeta.textContent = `${state.index + 1} / ${state.order.length}`;
 }
 
-async function showSkin() {
-  const skin = currentSkin();
-  if (!skin || !rateHandle) return;
-  await rateHandle.load(skin);
+async function showPhoto() {
+  const photo = currentPhoto();
+  if (!photo || !rateHandle) return;
+  // Для импортированных фото без файла url === null: вьюер покажет заглушку.
+  await rateHandle.load(photo.url, photo.name);
   refreshRatePanel();
 }
 
 function startSession() {
-  if (!state.skins.length) return;
-  state.order = shuffle(state.skins.map((s) => s.id));
+  if (!state.photos.length) return;
+  state.order = shuffle(state.photos.map((p) => p.id));
   state.index = 0;
   setScreen("rate");
   if (!rateHandle) {
-    rateHandle = createAttachedViewer(document.getElementById("rate-canvas"), {
-      controls: true,
+    rateHandle = createPhotoViewer(els.rateStage, {
+      showChip: false, // процент показывается в тулбаре
+      onZoom: (ratio) => {
+        els.zoomLevel.textContent = `${Math.round(ratio * 100)}%`;
+      },
     });
   }
-  rateHandle.resume();
-  showSkin();
-}
-
-async function setModel(model) {
-  const skin = currentSkin();
-  if (!skin || !rateHandle) return;
-  skin.model = model;
-  skin.thumb = null;
-  invalidateTiebreak();
-  rateHandle.setModel(model);
-  refreshRatePanel();
+  showPhoto();
 }
 
 function goPrev() {
   if (state.index === 0) return;
   state.index -= 1;
-  showSkin();
+  showPhoto();
 }
 
 async function goNext() {
-  const skin = currentSkin();
-  if (!skin) return;
-  const complete = CATEGORIES.every((c) => skin.ratings[c.key] != null);
-  if (!complete && !skin.skipped) return;
+  const photo = currentPhoto();
+  if (!photo) return;
+  const complete = CATEGORIES.every((c) => photo.ratings[c.key] != null);
+  if (!complete && !photo.skipped) return;
   if (state.index < state.order.length - 1) {
     state.index += 1;
-    await showSkin();
+    await showPhoto();
     return;
   }
   await finishRating();
 }
 
 async function skipCurrent() {
-  const skin = currentSkin();
-  if (!skin) return;
-  skin.skipped = true;
+  const photo = currentPhoto();
+  if (!photo) return;
+  photo.skipped = true;
   for (const cat of CATEGORIES) {
-    skin.ratings[cat.key] = null;
+    photo.ratings[cat.key] = null;
   }
-  skin.thumb = null;
+  photo.thumb = null;
   invalidateTiebreak();
   if (state.index < state.order.length - 1) {
     state.index += 1;
-    await showSkin();
+    await showPhoto();
     return;
   }
   await finishRating();
 }
 
-function rankedSkins(sortKey = state.sortKey) {
+function rankedPhotos(sortKey = state.sortKey) {
   const tiebreak = state.tiebreak;
-  return [...state.skins]
-    .filter((skin) => !skin.skipped)
-    .map((skin) => {
-      const score = average(skin.ratings) ?? -1;
-      const sortScore = sortKey === "total" || score < 0 ? score : (skin.ratings[sortKey] ?? -1);
-      return { skin, score, sortScore };
+  return [...state.photos]
+    .filter((photo) => !photo.skipped)
+    .map((photo) => {
+      const score = average(photo.ratings) ?? -1;
+      const sortScore = sortKey === "total" || score < 0 ? score : (photo.ratings[sortKey] ?? -1);
+      return { photo, score, sortScore };
     })
     .sort((a, b) => {
       if (sortKey === "total") {
         if (b.score !== a.score) return b.score - a.score;
         // Тейбрейкер разрешает порядок только при равенстве итогового балла.
-        // Скины без рейтинга (undefined) считаются «хуже» любых размеченных —
-        // так разрешённая топ-8 не вытесняется снизу скином с тем же баллом.
+        // Фото без рейтинга (undefined) считаются «хуже» любых размеченных —
+        // так разрешённая топ-8 не вытесняется снизу фото с тем же баллом.
         if (tiebreak) {
-          const ra = tiebreak.get(a.skin.id);
-          const rb = tiebreak.get(b.skin.id);
+          const ra = tiebreak.get(a.photo.id);
+          const rb = tiebreak.get(b.photo.id);
           const raV = ra == null ? Infinity : ra;
           const rbV = rb == null ? Infinity : rb;
           if (raV !== rbV) return raV - rbV;
         }
-        return a.skin.name.localeCompare(b.skin.name, "ru");
+        return a.photo.name.localeCompare(b.photo.name, "ru");
       }
-      return b.sortScore - a.sortScore || b.score - a.score || a.skin.name.localeCompare(b.skin.name, "ru");
+      return b.sortScore - a.sortScore || b.score - a.score || a.photo.name.localeCompare(b.photo.name, "ru");
     });
 }
 
 function matchesFilters(row) {
   const f = state.filters;
   const query = f.query.trim().toLowerCase();
-  const name = String(row.skin.name || "").toLowerCase();
-  const relativePath = String(row.skin.relativePath || "").toLowerCase();
+  const name = String(row.photo.name || "").toLowerCase();
+  const relativePath = String(row.photo.relativePath || "").toLowerCase();
   if (query && !name.includes(query) && !relativePath.includes(query)) return false;
 
   const total = row.score < 0 ? null : row.score;
@@ -530,18 +534,18 @@ function matchesFilters(row) {
   if (f.minScore != null && total < f.minScore) return false;
   if (f.maxScore != null && total > f.maxScore) return false;
   for (const key of CATEGORY_KEYS) {
-    if (f.min[key] > 0 && (row.skin.ratings[key] ?? 0) < f.min[key]) return false;
+    if (f.min[key] > 0 && (row.photo.ratings[key] ?? 0) < f.min[key]) return false;
   }
   return true;
 }
 
 function renderTableOnly() {
-  const ranked = rankedSkins();
+  const ranked = rankedPhotos();
   renderTable(ranked.filter(matchesFilters), ranked);
 }
 
 // Показ/скрытие панели фильтров таблицы лидеров. Скрытое состояние хранится
-// только в атрибуте hidden — никаких пересозданий элементов и WebGL.
+// только в атрибуте hidden — никаких пересозданий элементов.
 function setFiltersVisible(visible) {
   els.boardFilters.hidden = !visible;
   els.toggleFilters.setAttribute("aria-expanded", String(visible));
@@ -571,34 +575,26 @@ function syncBoardFilters() {
   }
 }
 
-function disposePodium() {
-  podiumRenderToken += 1;
-  while (podiumHandles.length) {
-    const handle = podiumHandles.pop();
-    handle.dispose();
-  }
-}
-
 function invalidateTiebreak() {
   // Любое изменение оценок сбрасывает результат тейбрейкера — при следующем
   // переходе к таблице лидеров он будет проведён заново, если ничьи ещё есть.
   state.tiebreak = null;
 }
 
-// Группы скинов с одинаковым итоговым баллом внутри топ-8 (по общей оценке).
+// Группы фото с одинаковым итоговым баллом внутри топ-8 (по общей оценке).
 // Вне топ-8 тейбрейкер не нужен — порядок там не влияет на «призы».
 function findTieGroups() {
-  const ranked = rankedSkins("total");
+  const ranked = rankedPhotos("total");
   const top = ranked.slice(0, 8);
   const groups = [];
   let current = [];
   let currentScore = null;
   for (const row of top) {
     if (current.length && row.score === currentScore) {
-      current.push(row.skin);
+      current.push(row.photo);
     } else {
       if (current.length >= 2) groups.push(current);
-      current = [row.skin];
+      current = [row.photo];
       currentScore = row.score;
     }
   }
@@ -607,7 +603,7 @@ function findTieGroups() {
 }
 
 // Точка входа в тейбрейкер: вызывается из finishRating перед таблицей лидеров.
-// Возвращает Map(skinId -> rank). Если ничьих нет — пустой Map.
+// Возвращает Map(photoId -> rank). Если ничьих нет — пустой Map.
 async function runTiebreak(groups) {
   if (!groups.length) return new Map();
 
@@ -617,8 +613,14 @@ async function runTiebreak(groups) {
   // Два переиспользуемых вьюера на весь экран тейбрейкера.
   if (!tiebreakHandles.length) {
     tiebreakHandles.push(
-      createAttachedViewer(els.tiebreakLeft.querySelector("canvas"), { controls: true, zoom: 0.8 }),
-      createAttachedViewer(els.tiebreakRight.querySelector("canvas"), { controls: true, zoom: 0.8 }),
+      createPhotoViewer(els.tiebreakLeft.querySelector(".tiebreak-stage"), {
+        showChip: true,
+        focusable: false,
+      }),
+      createPhotoViewer(els.tiebreakRight.querySelector(".tiebreak-stage"), {
+        showChip: true,
+        focusable: false,
+      }),
     );
   }
 
@@ -630,15 +632,15 @@ async function runTiebreak(groups) {
     const group = groups[gi];
     if (tiebreakAborted) {
       // При отказе сохраняем текущий (именной) порядок группы.
-      group.forEach((skin, idx) => result.set(skin.id, idx));
+      group.forEach((photo, idx) => result.set(photo.id, idx));
       continue;
     }
     tiebreakGroupLabel =
       `Группа ${gi + 1} из ${groups.length} · одинаковый балл ${formatScore(average(group[0].ratings))} · ` +
-      `${group.length} ${pluralSkins(group.length).split(" ")[1]} с ничьей`;
+      `${group.length} фото с ничьей`;
     els.tiebreakInfo.textContent = tiebreakGroupLabel;
     const ordered = await orderGroup(group.slice());
-    ordered.forEach((skin, idx) => result.set(skin.id, idx));
+    ordered.forEach((photo, idx) => result.set(photo.id, idx));
   }
 
   disposeTiebreakViewers();
@@ -681,11 +683,11 @@ async function mergeOrdered(left, right) {
   return out;
 }
 
-// Показывает пару скинов и ждёт выбора пользователя. Возвращает [winner, loser].
+// Показывает пару фото и ждёт выбора пользователя. Возвращает [winner, loser].
 async function resolvePair(a, b) {
   if (tiebreakAborted) return [a, b];
 
-  await Promise.all([tiebreakHandles[0].load(a), tiebreakHandles[1].load(b)]);
+  await Promise.all([tiebreakHandles[0].load(a.url, a.name), tiebreakHandles[1].load(b.url, b.name)]);
   if (tiebreakAborted) return [a, b];
 
   tiebreakCompareCount += 1;
@@ -698,10 +700,10 @@ async function resolvePair(a, b) {
   return choice === a.id ? [a, b] : [b, a];
 }
 
-function fillTiebreakCard(card, skin) {
-  card.dataset.id = skin.id;
-  card.querySelector(".tiebreak-name").textContent = skin.name;
-  card.querySelector(".tiebreak-score").textContent = formatScore(average(skin.ratings));
+function fillTiebreakCard(card, photo) {
+  card.dataset.id = photo.id;
+  card.querySelector(".tiebreak-name").textContent = photo.name;
+  card.querySelector(".tiebreak-score").textContent = formatScore(average(photo.ratings));
 }
 
 function waitForChoice() {
@@ -738,7 +740,6 @@ function disposeTiebreakViewers() {
 // таблицу лидеров. Тейбрейкер проводится один раз и кешируется в state.tiebreak,
 // пока оценки не изменятся (что сбрасывает кеш через invalidateTiebreak).
 async function finishRating() {
-  if (rateHandle) rateHandle.pause();
   if (state.tiebreak == null) {
     const groups = findTieGroups();
     state.tiebreak = groups.length ? await runTiebreak(groups) : new Map();
@@ -747,55 +748,51 @@ async function finishRating() {
 }
 
 async function openLeaderboard() {
-  if (rateHandle) rateHandle.pause();
   setScreen("board");
   // У импортированной сессии нет экрана оценки — прячем «вернуться к оценкам».
   els.btnBackRate.hidden = !!state.imported;
-  const ratedCount = state.skins.filter((skin) => !skin.skipped).length;
+  const ratedCount = state.photos.filter((photo) => !photo.skipped).length;
   els.topbarMeta.textContent = `Оценено: ${ratedCount}`;
-  els.podium.innerHTML = `<div class="podium-empty">Готовим 3D-превью…</div>`;
-  els.lbBody.replaceChildren();
-  els.boardSort.value = state.sortKey;
-  syncBoardFilters();
-
-  const activeSkins = state.skins.filter((skin) => !skin.skipped);
-  await Promise.all(activeSkins.map((skin) => (skin.thumb ? skin.thumb : captureThumb(skin))));
+  const activePhotos = state.photos.filter((photo) => !photo.skipped);
+  await Promise.all(activePhotos.map((photo) => (photo.thumb ? photo.thumb : captureThumb(photo))));
   await renderLeaderboard();
 }
 
 async function renderLeaderboard() {
-  const ranked = rankedSkins();
+  const ranked = rankedPhotos();
   renderTable(ranked.filter(matchesFilters), ranked);
-  await renderPodium(ranked.slice(0, 3));
+  renderPodium(ranked.slice(0, 3));
 }
 
 function renderTable(ranked, allRanked = ranked) {
-  if (!ranked.length) {
+  const ratedCount = allRanked.filter((row) => row.score >= 0).length;
+  if (!ratedCount || !ranked.length) {
     const empty = document.createElement("tr");
-    // Место + Скин + Итог + категории + действия.
-    empty.innerHTML = `<td colspan="${CATEGORIES.length + 4}" class="table-empty">Ничего не найдено по фильтрам</td>`;
+    // Место + Фото + Итог + категории + действия.
+    const message = ratedCount ? "Ничего не найдено по фильтрам" : "Нет оценённых фото";
+    empty.innerHTML = `<td colspan="${CATEGORIES.length + 4}" class="table-empty">${message}</td>`;
     els.lbBody.replaceChildren(empty);
     return;
   }
 
-  const places = new Map(allRanked.map((row, index) => [row.skin.id, index + 1]));
+  const places = new Map(allRanked.map((row, index) => [row.photo.id, index + 1]));
   els.lbBody.replaceChildren(
     ...ranked.map((row, i) => {
-      const place = places.get(row.skin.id) ?? i + 1;
+      const place = places.get(row.photo.id) ?? i + 1;
       const tr = document.createElement("tr");
       const badgeClass = place === 1 ? "gold" : place === 2 ? "silver" : place === 3 ? "bronze" : "";
       // Столбцы категорий — по одному на каждую категорию, в порядке CATEGORIES.
       const categoryCells = CATEGORY_KEYS.map(
-        (key) => `<td class="cat-cell" data-key="${key}">${row.skin.ratings[key] ?? "—"}</td>`,
+        (key) => `<td class="cat-cell" data-key="${key}">${row.photo.ratings[key] ?? "—"}</td>`,
       ).join("");
       tr.innerHTML = `
         <td><span class="place-badge ${badgeClass}">${place}</span></td>
         <td>
-          <div class="skin-cell">
-            <div class="thumb-wrap" data-tip="${escapeAttr(row.skin.relativePath)}" role="button" tabindex="0" aria-label="Открыть подробный просмотр">
+          <div class="photo-cell">
+            <div class="thumb-wrap" data-tip="${escapeAttr(row.photo.relativePath)}" role="button" tabindex="0" aria-label="Открыть подробный просмотр">
               <img alt="" />
             </div>
-            <span class="skin-name" role="button" tabindex="0"></span>
+            <span class="photo-name" role="button" tabindex="0"></span>
           </div>
         </td>
         <td class="score-strong">${formatScore(row.score < 0 ? null : row.score)}</td>
@@ -809,41 +806,37 @@ function renderTable(ranked, allRanked = ranked) {
         </td>
       `;
       const img = tr.querySelector("img");
-      img.src = row.skin.thumb || "";
-      img.alt = row.skin.name;
+      img.src = row.photo.thumb || "";
+      img.alt = row.photo.name;
       const wrap = tr.querySelector(".thumb-wrap");
-      const name = tr.querySelector(".skin-name");
+      const name = tr.querySelector(".photo-name");
       const openDetailFromKeyboard = (event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
-        void openDetail(row.skin);
+        void openDetail(row.photo);
       };
-      name.textContent = row.skin.name;
-      wrap.addEventListener("pointerenter", (event) => showTip(event, row.skin.relativePath));
+      name.textContent = row.photo.name;
+      wrap.addEventListener("pointerenter", (event) => showTip(event, row.photo.relativePath));
       wrap.addEventListener("pointerleave", hideTip);
-      wrap.addEventListener("click", () => void openDetail(row.skin));
+      wrap.addEventListener("click", () => void openDetail(row.photo));
       wrap.addEventListener("keydown", openDetailFromKeyboard);
-      name.addEventListener("click", () => void openDetail(row.skin));
+      name.addEventListener("click", () => void openDetail(row.photo));
       name.addEventListener("keydown", openDetailFromKeyboard);
-      tr.querySelector(".icon-btn").addEventListener("click", () => onReveal(row.skin));
+      tr.querySelector(".icon-btn").addEventListener("click", () => onReveal(row.photo));
       return tr;
     }),
   );
 }
 
-async function renderPodium(top) {
-  disposePodium();
-  const renderToken = podiumRenderToken;
+function renderPodium(top) {
   els.podium.replaceChildren();
   if (!top.length) {
-    els.podium.innerHTML = `<div class="podium-empty">Нет оценённых скинов</div>`;
+    els.podium.innerHTML = `<div class="podium-empty">Нет оценённых фото</div>`;
     return;
   }
 
   const labels = ["1 место", "2 место", "3 место"];
   for (let i = 0; i < 3; i += 1) {
-    if (renderToken !== podiumRenderToken) return;
-
     const card = document.createElement("article");
     card.className = `podium-card${i === 0 ? " is-first" : ""}`;
     card.dataset.place = String(i + 1);
@@ -852,37 +845,20 @@ async function renderPodium(top) {
       els.podium.append(card);
       continue;
     }
-    const { skin, score } = top[i];
-    if (!skin.url) {
-      // Импортированный скин без файла — 3D недоступен, показываем плейсхолдер.
-      card.innerHTML = `
-        <div class="podium-place">${labels[i]}</div>
-        <div class="podium-stage"><img class="podium-ph" alt="" /></div>
-        <div class="podium-name" title="${escapeAttr(skin.relativePath)}"></div>
-        <div class="podium-score">${formatScore(score < 0 ? null : score)}</div>
-      `;
-      card.querySelector(".podium-name").textContent = skin.name;
-      card.querySelector(".podium-ph").src = skin.thumb || thumbPlaceholder();
-      els.podium.append(card);
-      continue;
-    }
+    const { photo, score } = top[i];
+    // Превью статичное: интерактивный просмотр — в детальном диалоге.
+    // Без файла (импорт) — плейсхолдер.
     card.innerHTML = `
       <div class="podium-place">${labels[i]}</div>
-      <div class="podium-stage"><canvas></canvas></div>
-      <div class="podium-name" title="${escapeAttr(skin.relativePath)}"></div>
+      <div class="podium-stage"><img class="podium-ph" alt="" /></div>
+      <div class="podium-name" title="${escapeAttr(photo.relativePath)}"></div>
       <div class="podium-score">${formatScore(score < 0 ? null : score)}</div>
     `;
-    card.querySelector(".podium-name").textContent = skin.name;
+    card.querySelector(".podium-name").textContent = photo.name;
+    const img = card.querySelector(".podium-ph");
+    img.src = photo.thumb || thumbPlaceholder();
+    img.alt = photo.name;
     els.podium.append(card);
-    const canvas = card.querySelector("canvas");
-    const handle = createAttachedViewer(canvas, { controls: true, zoom: 0.8 });
-    podiumHandles.push(handle);
-    try {
-      await handle.load(skin);
-    } catch (error) {
-      if (renderToken !== podiumRenderToken) return;
-      throw error;
-    }
   }
 }
 
@@ -914,17 +890,17 @@ function fillPathFields(result, pathNode, dirNode) {
   dirNode.textContent = result.dirPath || result.path || "—";
 }
 
-function onReveal(skin) {
+function onReveal(photo) {
   // Из браузера нельзя открыть системный проводник и выделить файл — показываем
   // известный путь к файлу и папке, чтобы пользователь скопировал его и открыл
   // папку вручную. Никаких диалогов выбора файлов/папок.
-  const result = revealSkin(skin);
+  const result = revealPhoto(photo);
   fillPathFields(result, els.revealPath, els.revealDir);
   if (typeof els.dialog.showModal === "function") els.dialog.showModal();
   else showToast(result.path || result.dirPath);
 }
 
-function renderDetailCategories(skin) {
+function renderDetailCategories(photo) {
   els.detailCategories.replaceChildren(
     ...CATEGORIES.map((cat) => {
       const row = document.createElement("div");
@@ -932,49 +908,51 @@ function renderDetailCategories(skin) {
       // data-key даёт строке цвет категории (--cat-color из css/app.css).
       row.dataset.key = cat.key;
       row.innerHTML = `<span><i class="swatch"></i>${cat.label}</span><strong></strong>`;
-      row.querySelector("strong").textContent = skin.ratings[cat.key] ?? "—";
+      row.querySelector("strong").textContent = photo.ratings[cat.key] ?? "—";
       return row;
     }),
   );
 }
 
-async function openDetail(skin) {
-  if (!skin) return;
+async function openDetail(photo) {
+  if (!photo) return;
   if (els.detailDialog.open) els.detailDialog.close();
 
   detailRenderToken += 1;
   const renderToken = detailRenderToken;
-  detailSkin = skin;
-  els.detailName.textContent = skin.name;
-  const score = average(skin.ratings);
-  els.detailScore.textContent = skin.skipped ? "Пропущен" : formatScore(score);
-  renderDetailCategories(skin);
+  detailPhoto = photo;
+  els.detailName.textContent = photo.name;
+  const score = average(photo.ratings);
+  els.detailScore.textContent = photo.skipped ? "Пропущено" : formatScore(score);
+  renderDetailCategories(photo);
 
-  const hasFile = !!skin.url;
-  els.detailCanvas.hidden = !hasFile;
+  const hasFile = !!photo.url;
   els.detailPlaceholder.hidden = hasFile;
   if (!hasFile) {
-    els.detailPlaceholder.src = skin.thumb || thumbPlaceholder();
+    els.detailPlaceholder.src = photo.thumb || thumbPlaceholder();
   }
 
   if (typeof els.detailDialog.showModal !== "function") {
-    showToast(hasFile ? "Подробный просмотр недоступен" : skin.name);
+    showToast(hasFile ? "Подробный просмотр недоступен" : photo.name);
     return;
   }
   els.detailDialog.showModal();
   if (!hasFile) return;
 
   try {
-    const handle = createAttachedViewer(els.detailCanvas, { controls: true, zoom: 0.85 });
-    if (renderToken !== detailRenderToken || detailSkin !== skin || !els.detailDialog.open) {
+    const handle = createPhotoViewer(els.detailStage, {
+      showChip: true,
+      alt: photo.name,
+    });
+    if (renderToken !== detailRenderToken || detailPhoto !== photo || !els.detailDialog.open) {
       handle.dispose();
       return;
     }
     detailHandle = handle;
-    await handle.load(skin);
+    await handle.load(photo.url, photo.name);
   } catch {
-    if (renderToken === detailRenderToken && detailSkin === skin) {
-      showToast("Не удалось открыть 3D-просмотр");
+    if (renderToken === detailRenderToken && detailPhoto === photo) {
+      showToast("Не удалось открыть просмотр фото");
     }
   }
 }
@@ -1010,22 +988,18 @@ function handleDetailClose() {
     detailHandle.dispose();
     detailHandle = null;
   }
-  detailSkin = null;
-  els.detailCanvas.hidden = false;
+  detailPhoto = null;
   els.detailPlaceholder.hidden = true;
 }
 
 function backToRatings() {
-  disposePodium();
   setScreen("rate");
-  if (rateHandle) rateHandle.resume();
-  showSkin();
+  showPhoto();
 }
 
 function newSession() {
   if (els.detailDialog.open) els.detailDialog.close();
-  else if (detailHandle || detailSkin) handleDetailClose();
-  disposePodium();
+  else if (detailHandle || detailPhoto) handleDetailClose();
   disposeTiebreakViewers();
   disposeThumbEngine();
   if (rateHandle) {
@@ -1045,39 +1019,41 @@ function newSession() {
 
 // --- Экспорт / импорт оценок ---
 
-// Версия формата: 2 — текущий набор категорий (волосы, глаза, лицо, шейдинг кожи,
-// одежда сверху/снизу, обувь). В файле дублируется список ключей категорий,
-// чтобы импорт мог честно сказать о несовпадении с текущим набором.
-const EXPORT_VERSION = 2;
+// Версия формата: 3 — оценка фото, набор категорий (композиция, свет, цвет,
+// резкость, детализация, эмоция, атмосфера), без 3D-модели. В файле дублируется
+// список ключей категорий, чтобы импорт мог честно сказать о несовпадении
+// с текущим набором. Файлы v1–v2 (оценка скинов) при импорте читаются как
+// «skins» — по новым категориям в них оценок не будет.
+const EXPORT_VERSION = 3;
 
 function freshId() {
   if (crypto.randomUUID) return crypto.randomUUID();
-  return `skin-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `photo-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function exportRatings() {
-  const rated = state.skins.filter((s) => !s.skipped);
+  const rated = state.photos.filter((p) => !p.skipped);
   if (!rated.length) {
-    showToast("Нет оценённых скинов для сохранения");
+    showToast("Нет оценённых фото для сохранения");
     return;
   }
   const data = {
     version: EXPORT_VERSION,
+    app: "photovote",
     date: new Date().toISOString(),
     categories: CATEGORY_KEYS.slice(),
-    skins: state.skins.map((s) => {
-      // Пропущенные скины сохраняются без оценок, остальные — по всем категориям.
+    photos: state.photos.map((p) => {
+      // Пропущенные фото сохраняются без оценок, остальные — по всем категориям.
       const ratings = CATEGORY_KEYS.reduce((acc, key) => {
-        acc[key] = s.skipped ? null : (s.ratings[key] ?? null);
+        acc[key] = p.skipped ? null : (p.ratings[key] ?? null);
         return acc;
       }, {});
       return {
-        name: s.name,
-        relativePath: s.relativePath,
-        model: s.model === "slim" ? "slim" : "wide",
+        name: p.name,
+        relativePath: p.relativePath,
         ratings,
-        note: s.note || "",
-        skipped: !!s.skipped,
+        note: p.note || "",
+        skipped: !!p.skipped,
       };
     }),
   };
@@ -1086,7 +1062,7 @@ function exportRatings() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `skinvote-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `photovote-${new Date().toISOString().slice(0, 10)}.json`;
   document.body.append(a);
   a.click();
   a.remove();
@@ -1101,19 +1077,19 @@ function parseSession(text) {
   } catch {
     throw new Error("Файл не является корректным JSON");
   }
-  if (!data || typeof data !== "object" || !Array.isArray(data.skins)) {
-    throw new Error("Неверная структура файла: ожидается объект со списком skins");
+  const rawList = Array.isArray(data?.photos) ? data.photos : Array.isArray(data?.skins) ? data.skins : null;
+  if (!data || typeof data !== "object" || !rawList) {
+    throw new Error("Неверная структура файла: ожидается объект со списком photos");
   }
   // Ключи категорий, которые реально встречаются в файле: нужны, чтобы
   // предупредить о файле, сохранённом для другого набора категорий.
   const fileKeys = new Set();
-  const skins = data.skins.map((raw, i) => {
+  const photos = rawList.map((raw, i) => {
     if (!raw || typeof raw !== "object") {
-      throw new Error(`Скин #${i + 1}: неверная запись`);
+      throw new Error(`Фото #${i + 1}: неверная запись`);
     }
-    const name = String(raw.name || `skin-${i + 1}.png`);
+    const name = String(raw.name || `photo-${i + 1}.jpg`);
     const relativePath = String(raw.relativePath || name);
-    const model = raw.model === "slim" ? "slim" : "wide";
     const skipped = !!raw.skipped;
     const inRatings = raw.ratings && typeof raw.ratings === "object" ? raw.ratings : {};
     Object.keys(inRatings).forEach((key) => fileKeys.add(key));
@@ -1132,7 +1108,6 @@ function parseSession(text) {
       height: null,
       fileHandle: null,
       dirHandle: null,
-      model,
       ratings,
       thumb: null,
       note: typeof raw.note === "string" ? raw.note : "",
@@ -1143,9 +1118,9 @@ function parseSession(text) {
   return {
     version: Number(data.version) || 1,
     date: typeof data.date === "string" ? data.date : null,
-    // v2 пишет список категорий явно; у более старых файлов берём его из оценок.
+    // v3 пишет список категорий явно; у более старых файлов берём его из оценок.
     categories: Array.isArray(data.categories) ? data.categories.map((key) => String(key)) : [...fileKeys],
-    skins,
+    photos,
   };
 }
 
@@ -1162,7 +1137,7 @@ function formatSessionDate(iso) {
   return d.toLocaleString("ru-RU", { dateStyle: "medium", timeStyle: "short" });
 }
 
-function normalizeSkinPath(value) {
+function normalizePhotoPath(value) {
   return String(value || "")
     .replace(/\\/g, "/")
     .replace(/^\.\/+/, "")
@@ -1170,73 +1145,73 @@ function normalizeSkinPath(value) {
     .toLowerCase();
 }
 
-function skinFileName(value) {
-  const path = normalizeSkinPath(value);
+function photoFileName(value) {
+  const path = normalizePhotoPath(value);
   return path.slice(path.lastIndexOf("/") + 1);
 }
 
-function findImportedFileMatches(importedSkins, loadedSkins) {
-  const available = loadedSkins.filter((skin) => skin.file || skin.url);
+function findImportedFileMatches(importedPhotos, loadedPhotos) {
+  const available = loadedPhotos.filter((photo) => photo.file || photo.url);
   const used = new Set();
   const matches = new Map();
 
-  for (const importedSkin of importedSkins) {
-    const importedPath = normalizeSkinPath(importedSkin.relativePath);
-    const importedName = skinFileName(importedSkin.name || importedSkin.relativePath);
+  for (const importedPhoto of importedPhotos) {
+    const importedPath = normalizePhotoPath(importedPhoto.relativePath);
+    const importedName = photoFileName(importedPhoto.name || importedPhoto.relativePath);
     let candidates = available.filter(
-      (loadedSkin) => !used.has(loadedSkin.id) && normalizeSkinPath(loadedSkin.relativePath) === importedPath,
+      (loadedPhoto) => !used.has(loadedPhoto.id) && normalizePhotoPath(loadedPhoto.relativePath) === importedPath,
     );
     if (candidates.length !== 1) {
       candidates = available.filter(
-        (loadedSkin) => !used.has(loadedSkin.id) && skinFileName(loadedSkin.name) === importedName,
+        (loadedPhoto) => !used.has(loadedPhoto.id) && photoFileName(loadedPhoto.name) === importedName,
       );
     }
     if (candidates.length !== 1) continue;
-    const loadedSkin = candidates[0];
-    used.add(loadedSkin.id);
-    matches.set(importedSkin.id, loadedSkin);
+    const loadedPhoto = candidates[0];
+    used.add(loadedPhoto.id);
+    matches.set(importedPhoto.id, loadedPhoto);
   }
   return matches;
 }
 
 function mergeImportedFiles(session) {
-  const loadedSkins = state.skins;
-  const matches = findImportedFileMatches(session.skins, loadedSkins);
-  const matchedLoadedSkins = new Set(matches.values());
-  const mergedSkins = session.skins.map((importedSkin) => {
-    const loadedSkin = matches.get(importedSkin.id);
-    if (!loadedSkin) return importedSkin;
+  const loadedPhotos = state.photos;
+  const matches = findImportedFileMatches(session.photos, loadedPhotos);
+  const matchedLoadedPhotos = new Set(matches.values());
+  const mergedPhotos = session.photos.map((importedPhoto) => {
+    const loadedPhoto = matches.get(importedPhoto.id);
+    if (!loadedPhoto) return importedPhoto;
     return {
-      ...importedSkin,
-      file: loadedSkin.file,
-      url: loadedSkin.url,
-      width: loadedSkin.width,
-      height: loadedSkin.height,
-      fileHandle: loadedSkin.fileHandle,
-      dirHandle: loadedSkin.dirHandle,
-      // JSON-модель, оценки и заметка имеют приоритет; превью создадим заново.
+      ...importedPhoto,
+      file: loadedPhoto.file,
+      url: loadedPhoto.url,
+      width: loadedPhoto.width,
+      height: loadedPhoto.height,
+      fileHandle: loadedPhoto.fileHandle,
+      dirHandle: loadedPhoto.dirHandle,
+      // JSON-оценки и заметка имеют приоритет; превью создадим заново.
       thumb: null,
     };
   });
 
-  loadedSkins.forEach((loadedSkin) => {
-    if (!matchedLoadedSkins.has(loadedSkin)) revokeSkin(loadedSkin);
+  loadedPhotos.forEach((loadedPhoto) => {
+    if (!matchedLoadedPhotos.has(loadedPhoto)) revokePhoto(loadedPhoto);
   });
-  return { skins: mergedSkins, matchedCount: matches.size };
+  return { photos: mergedPhotos, matchedCount: matches.size };
 }
 
 function showImportPreview(session) {
-  const total = session.skins.length;
-  const rated = session.skins.filter((s) => !s.skipped).length;
+  const total = session.photos.length;
+  const rated = session.photos.filter((p) => !p.skipped).length;
   const skipped = total - rated;
-  const sample = session.skins.slice(0, 4).map((s) => escapeAttr(s.name)).join(", ");
-  const matches = findImportedFileMatches(session.skins, state.skins).size;
-  const hasLoadedFiles = state.skins.some((skin) => skin.file || skin.url);
+  const sample = session.photos.slice(0, 4).map((p) => escapeAttr(p.name)).join(", ");
+  const matches = findImportedFileMatches(session.photos, state.photos).size;
+  const hasLoadedFiles = state.photos.some((photo) => photo.file || photo.url);
   const previewHint = matches
-    ? `Будут подключены локальные PNG для ${matches} из ${total} скинов; для остальных останутся плейсхолдеры.`
+    ? `Будут подключены локальные файлы для ${matches} из ${total} фото; для остальных останутся плейсхолдеры.`
     : hasLoadedFiles
-      ? "Совпадений с уже загруженными PNG не найдено; для скинов будут показаны плейсхолдеры."
-      : "Если PNG не загружены, для скинов будут показаны плейсхолдеры вместо 3D-превью.";
+      ? "Совпадений с уже загруженными файлами не найдено; для фото будут показаны плейсхолдеры."
+      : "Если фото не загружены, для них будут показаны плейсхолдеры вместо превью.";
   const missing = missingCategories(session);
   const missingHint = missing.length
     ? `<p class="import-warning" style="margin-top:8px">Файл сохранён для другого набора категорий: нет оценок по «${missing
@@ -1245,20 +1220,20 @@ function showImportPreview(session) {
     : "";
   els.importPreview.innerHTML = `
     <p class="muted">Сессия от <b>${formatSessionDate(session.date)}</b></p>
-    <p>Скинов в файле: <b>${total}</b>${rated !== total ? ` (оценено ${rated}, пропущено ${skipped})` : ""}</p>
+    <p>Фото в файле: <b>${total}</b>${rated !== total ? ` (оценено ${rated}, пропущено ${skipped})` : ""}</p>
     ${sample ? `<p class="muted" style="margin-top:8px">Например: ${sample}${total > 4 ? "…" : ""}</p>` : ""}
     <p class="muted" style="margin-top:8px">${previewHint}</p>
     ${missingHint}
     <p class="muted" style="margin-top:8px">Сразу откроется таблица лидеров.</p>
   `;
   if (typeof els.importDialog.showModal === "function") els.importDialog.showModal();
-  else showToast(`Импорт: ${total} скинов`);
+  else showToast(`Импорт: ${total} фото`);
 }
 
 function loadImportedSession(session) {
   if (typeof els.importDialog.close === "function") els.importDialog.close();
   const merged = mergeImportedFiles(session);
-  state.skins = merged.skins;
+  state.photos = merged.photos;
   state.rejected = [];
   state.skipped = 0;
   state.order = [];
@@ -1269,7 +1244,7 @@ function loadImportedSession(session) {
   resetBoardFilters();
   setFiltersVisible(false);
   if (merged.matchedCount) {
-    showToast(`Подключены локальные PNG: ${merged.matchedCount} из ${session.skins.length}`);
+    showToast(`Подключены локальные файлы: ${merged.matchedCount} из ${session.photos.length}`);
   }
   // Импортированные данные показываем сразу, без экрана оценки и тейбрейкера.
   openLeaderboard();
@@ -1291,8 +1266,8 @@ async function handleImportFile(file) {
     showToast(error.message || "Неверный формат файла");
     return;
   }
-  if (!session.skins.length) {
-    showToast("В файле нет скинов");
+  if (!session.photos.length) {
+    showToast("В файле нет фото");
     return;
   }
   pendingImport = session;
@@ -1407,8 +1382,9 @@ function bindRate() {
   els.btnPrev.addEventListener("click", goPrev);
   els.btnNext.addEventListener("click", goNext);
   els.btnSkip.addEventListener("click", skipCurrent);
-  els.btnSlim.addEventListener("click", () => setModel("slim"));
-  els.btnWide.addEventListener("click", () => setModel("wide"));
+  els.btnZoomIn.addEventListener("click", () => rateHandle?.zoomIn());
+  els.btnZoomOut.addEventListener("click", () => rateHandle?.zoomOut());
+  els.btnZoomFit.addEventListener("click", () => rateHandle?.resetView());
   els.boardSort.addEventListener("change", async () => {
     state.sortKey = els.boardSort.value;
     await renderLeaderboard();
@@ -1445,9 +1421,18 @@ function bindRate() {
   // Экспорт оценок в JSON.
   els.btnExport.addEventListener("click", exportRatings);
 
-  // Тейбрейкер: клик по карточке = выбор скина; «оставить как есть» = отмена.
-  els.tiebreakLeft.addEventListener("click", () => pickTiebreak(els.tiebreakLeft.dataset.id));
-  els.tiebreakRight.addEventListener("click", () => pickTiebreak(els.tiebreakRight.dataset.id));
+  // Тейбрейкер: клик по карточке = выбор фото; «оставить как есть» = отмена.
+  // Клик, выросший из перетаскивания фото, гасится вьюером.
+  els.tiebreakLeft.addEventListener("click", () => {
+    const handle = tiebreakHandles[0];
+    if (handle && handle.suppressClick()) return;
+    pickTiebreak(els.tiebreakLeft.dataset.id);
+  });
+  els.tiebreakRight.addEventListener("click", () => {
+    const handle = tiebreakHandles[1];
+    if (handle && handle.suppressClick()) return;
+    pickTiebreak(els.tiebreakRight.dataset.id);
+  });
   els.btnTiebreakSkip.addEventListener("click", cancelTiebreak);
 
   // Подтверждение импорта.
@@ -1458,6 +1443,10 @@ function bindRate() {
 
   window.addEventListener("keydown", (event) => {
     if (state.screen !== "rate") return;
+    // На сцене в фокусе стрелки/зумные клавиши обрабатывает сам вьюер —
+    // навигация не должна дублироваться. Прочие клавиши (например, «s») — как обычно.
+    const stageKeys = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "+", "=", "-", "_", "0"]);
+    if (event.target === els.rateStage && stageKeys.has(event.key)) return;
     if (event.key === "ArrowLeft") goPrev();
     if (event.key === "ArrowRight") goNext();
     if (event.key === "s" || event.key === "S") skipCurrent();

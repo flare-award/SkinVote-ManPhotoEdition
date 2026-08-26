@@ -7,9 +7,9 @@
     <meta name="theme-color" content="#0b0c10" />
     <meta
       name="description"
-      content="SkinVote — локальная визуальная оценка скинов Minecraft. 3D-просмотр, рейтинг по категориям и таблица лидеров. Без загрузки на сервер."
+      content="PhotoVote — локальная визуальная оценка фото. Перемещение и масштаб без растяжения, рейтинг по категориям и таблица лидеров. Без загрузки на сервер."
     />
-    <title>SkinVote — оценка скинов Minecraft</title>
+    <title>PhotoVote — оценка фото</title>
     <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -34,8 +34,8 @@
             </svg>
           </span>
           <div class="brand-text">
-            <strong>SkinVote</strong>
-            <span>локальная оценка скинов</span>
+            <strong>PhotoVote</strong>
+            <span>локальная оценка фото</span>
           </div>
         </div>
         <div class="topbar-meta" id="topbar-meta"></div>
@@ -45,15 +45,15 @@
       <section id="screen-upload" class="screen is-active" data-screen="upload">
         <div class="upload-wrap">
           <div class="hero-copy">
-            <p class="eyebrow">Minecraft · 3D · только локально</p>
-            <h1>Оцените пак скинов<br />как на судейском столе</h1>
+            <p class="eyebrow">Фото · 2D · только локально</p>
+            <h1>Оцените серию фото<br />как на судейском столе</h1>
             <p class="lede">
-              Перетащите папку или PNG-файлы. Скины остаются на вашем компьютере:
-              рендер, оценки и таблица лидеров считаются прямо в браузере.
+              Перетащите папку или файлы с фото. Всё остаётся на вашем компьютере:
+              просмотр, оценки и таблица лидеров считаются прямо в браузере.
             </p>
           </div>
 
-          <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Зона загрузки скинов">
+          <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Зона загрузки фото">
             <div class="dropzone-glow" aria-hidden="true"></div>
             <div class="dropzone-icon" aria-hidden="true">
               <svg viewBox="0 0 48 48" width="48" height="48">
@@ -67,19 +67,19 @@
                 />
               </svg>
             </div>
-            <h2>Перетащите папку или PNG-скины</h2>
-            <p>Поддерживаются классические и HD-скины Minecraft (64×32, 64×64 и кратные)</p>
+            <h2>Перетащите папку или фото</h2>
+            <p>Поддерживаются PNG, JPG, WebP, GIF, BMP, AVIF и TIFF — любого разрешения (до 64 Мп)</p>
             <div class="dropzone-actions">
               <button type="button" class="btn btn-tonal" id="btn-pick-files">
                 <span class="btn-ico" aria-hidden="true">
                   <svg viewBox="0 0 24 24" width="18" height="18">
                     <path
                       fill="currentColor"
-                      d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm0 2.5L17.5 8H14zM8 13h8v2H8zm0 4h8v2H8z"
+                      d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5 4.5 6H5l3.5-4.5zM17 6.5A1.5 1.5 0 1 1 17 9.5a1.5 1.5 0 0 1 0-3z"
                     />
                   </svg>
                 </span>
-                Выбрать файлы
+                Выбрать фото
               </button>
               <button type="button" class="btn btn-tonal" id="btn-pick-folder">
                 <span class="btn-ico" aria-hidden="true">
@@ -113,7 +113,7 @@
           <div id="upload-summary" class="upload-summary" hidden>
             <div class="summary-head">
               <div>
-                <h3 id="valid-count">Найдено 0 валидных скинов</h3>
+                <h3 id="valid-count">Найдено 0 фото</h3>
                 <p id="skip-count" class="muted"></p>
               </div>
               <button type="button" class="btn btn-text" id="btn-clear-all">Очистить всё</button>
@@ -143,21 +143,73 @@
         <div class="rate-layout">
           <article class="viewer-card">
             <div class="viewer-toolbar">
-              <div class="file-pill" id="current-name" title="">skin.png</div>
-              <div class="model-switch" role="group" aria-label="Тип модели">
-                <button type="button" class="seg" data-model="slim" id="btn-slim">Slim</button>
-                <button type="button" class="seg is-active" data-model="wide" id="btn-wide">Wide</button>
+              <div class="file-pill" id="current-name" title="">photo.jpg</div>
+              <div class="zoom-controls" role="group" aria-label="Масштаб фото">
+                <button
+                  type="button"
+                  class="zoom-btn"
+                  id="btn-zoom-out"
+                  title="Уменьшить (−)"
+                  aria-label="Уменьшить масштаб"
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                    <path
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.4"
+                      stroke-linecap="round"
+                      d="M5 12h14"
+                    />
+                  </svg>
+                </button>
+                <span class="zoom-level" id="zoom-level">100%</span>
+                <button
+                  type="button"
+                  class="zoom-btn"
+                  id="btn-zoom-in"
+                  title="Увеличить (+)"
+                  aria-label="Увеличить масштаб"
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                    <path
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.4"
+                      stroke-linecap="round"
+                      d="M5 12h14M12 5v14"
+                    />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  class="zoom-btn"
+                  id="btn-zoom-fit"
+                  title="Вписать в рамку (0)"
+                  aria-label="Вписать фото в рамку"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    width="16"
+                    height="16"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M9 4H5a1 1 0 0 0-1 1v4M15 4h4a1 1 0 0 1 1 1v4M9 20H5a1 1 0 0 1-1-1v-4M15 20h4a1 1 0 0 0 1-1v-4" />
+                  </svg>
+                </button>
               </div>
             </div>
-            <div class="viewer-stage" id="rate-stage">
-              <canvas id="rate-canvas"></canvas>
-            </div>
-            <p class="viewer-hint">ЛКМ — вращение · ПКМ — сдвиг · колесо — масштаб</p>
+            <div class="viewer-stage" id="rate-stage"></div>
+            <p class="viewer-hint">ЛКМ — перемещение · колесо — масштаб · двойной клик — быстрый зум</p>
           </article>
 
           <aside class="rate-panel">
             <div class="panel-kicker">
-              <span id="rate-progress">Скин 1 из 1</span>
+              <span id="rate-progress">Фото 1 из 1</span>
               <span class="kicker-dot" aria-hidden="true"></span>
               <span id="rate-kicker-cats">7 категорий</span>
             </div>
@@ -273,7 +325,7 @@
             <div class="table-scroll">
               <table class="lb-table">
                 <thead>
-                  <!-- Столбцы строятся в js/app.js: Место / Скин / Итог / категории / действия. -->
+                  <!-- Столбцы строятся в js/app.js: Место / Фото / Итог / категории / действия. -->
                   <tr id="lb-head"></tr>
                 </thead>
                 <tbody id="lb-body"></tbody>
@@ -287,19 +339,19 @@
       <section id="screen-tiebreak" class="screen" data-screen="tiebreak" hidden>
         <div class="tiebreak-head">
           <p class="eyebrow">Ничья в топ-8</p>
-          <h2>Какой скин лучше?</h2>
-          <p class="muted" id="tiebreak-info">Сравните скины с одинаковым баллом и выберите лучший.</p>
+          <h2>Какое фото лучше?</h2>
+          <p class="muted" id="tiebreak-info">Сравните фото с одинаковым баллом и выберите лучшее.</p>
         </div>
         <div class="tiebreak-arena">
-          <button type="button" class="tiebreak-card" id="tiebreak-left" aria-label="Выбрать левый скин">
-            <div class="tiebreak-stage"><canvas></canvas></div>
+          <button type="button" class="tiebreak-card" id="tiebreak-left" aria-label="Выбрать левое фото">
+            <div class="tiebreak-stage"></div>
             <div class="tiebreak-name"></div>
             <div class="tiebreak-score"></div>
             <span class="tiebreak-pick">Выбрать</span>
           </button>
           <div class="tiebreak-vs" aria-hidden="true">VS</div>
-          <button type="button" class="tiebreak-card" id="tiebreak-right" aria-label="Выбрать правый скин">
-            <div class="tiebreak-stage"><canvas></canvas></div>
+          <button type="button" class="tiebreak-card" id="tiebreak-right" aria-label="Выбрать правое фото">
+            <div class="tiebreak-stage"></div>
             <div class="tiebreak-name"></div>
             <div class="tiebreak-score"></div>
             <span class="tiebreak-pick">Выбрать</span>
@@ -359,11 +411,11 @@
 
         <div class="detail-layout">
           <div class="detail-view">
-            <div class="detail-stage" id="detail-stage">
-              <canvas id="detail-canvas"></canvas>
+            <div class="detail-stage-wrap">
+              <div class="detail-stage" id="detail-stage"></div>
               <img id="detail-placeholder" class="detail-placeholder" alt="" hidden />
             </div>
-            <p class="viewer-hint">ЛКМ — вращение · ПКМ — сдвиг · колесо — масштаб</p>
+            <p class="viewer-hint">ЛКМ — перемещение · колесо — масштаб · двойной клик — быстрый зум</p>
           </div>
 
           <aside class="detail-panel">
@@ -380,11 +432,24 @@
       </form>
     </dialog>
 
-    <input id="input-files" type="file" accept="image/png,.png" multiple hidden />
-    <input id="input-folder" type="file" accept="image/png,.png" webkitdirectory directory multiple hidden />
+    <input
+      id="input-files"
+      type="file"
+      accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif,image/tiff,.png,.jpg,.jpeg,.webp,.gif,.bmp,.avif,.tif,.tiff"
+      multiple
+      hidden
+    />
+    <input
+      id="input-folder"
+      type="file"
+      accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif,image/tiff,.png,.jpg,.jpeg,.webp,.gif,.bmp,.avif,.tif,.tiff"
+      webkitdirectory
+      directory
+      multiple
+      hidden
+    />
     <input id="input-import" type="file" accept="application/json,.json" hidden />
 
-    <script src="./vendor/skinview3d.bundle.js"></script>
     <script type="module" src="./js/app.js"></script>
   </body>
 </html>

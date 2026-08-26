@@ -1,5 +1,32 @@
 import { emptyRatings } from "./categories.js";
 
+// Поддерживаемые фотоформаты: расширение либо MIME-тип файла.
+export const ACCEPTED_IMAGE_EXTENSIONS = [
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+  ".gif",
+  ".bmp",
+  ".avif",
+  ".tif",
+  ".tiff",
+];
+
+const ACCEPTED_IMAGE_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "image/bmp",
+  "image/avif",
+  "image/tiff",
+]);
+
+// Лимит по мегапикселям: битмап крупнее разворачивает в браузере сотни мегабайт
+// памяти, и вкладка может рухнуть. 64 Мп покрывает практически все камеры.
+export const MAX_PIXELS = 64_000_000;
+
 export function supportsFsAccess() {
   return typeof window.showOpenFilePicker === "function";
 }
@@ -17,136 +44,73 @@ export function shuffle(list) {
   return arr;
 }
 
-export function isPngFile(file) {
+export function isImageFile(file) {
   if (!file) return false;
   const name = (file.name || "").toLowerCase();
-  if (name.endsWith(".png")) return true;
-  return file.type === "image/png";
-}
-
-export function isValidSkinSize(width, height) {
-  if (!width || !height) return false;
-  if (width < 64 || width % 64 !== 0) return false;
-  return height === width || height * 2 === width;
+  if (ACCEPTED_IMAGE_EXTENSIONS.some((ext) => name.endsWith(ext))) return true;
+  return typeof file.type === "string" && ACCEPTED_IMAGE_TYPES.has(file.type);
 }
 
 function makeId() {
   if (crypto.randomUUID) return crypto.randomUUID();
-  return `skin-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `photo-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+// Декодируем файл и запоминаем его blob-URL как превью: дальше и вьюер, и
+// генератор миниатюр работают с одним и тем же URL — браузер декодирует
+// битмап один раз.
 async function measureImage(file) {
   const url = URL.createObjectURL(file);
   try {
     const img = new Image();
     img.src = url;
     await img.decode();
-    return { width: img.naturalWidth, height: img.naturalHeight, previewUrl: url, img };
+    return { width: img.naturalWidth, height: img.naturalHeight, previewUrl: url };
   } catch (error) {
     URL.revokeObjectURL(url);
     throw error;
   }
 }
 
-// skinview3d использует эти четыре области для собственного auto-detect. Проверяем
-// не отдельный пиксель, а весь прямоугольник: так один случайный прозрачный пиксель
-// не зависит от того, какая именно раскраска у руки. Координаты заданы для 64×64
-// и масштабируются для HD-скинов тем же способом, что и в skinview3d.
-const MODEL_REGIONS = [
-  [50, 16, 2, 4],
-  [54, 20, 2, 12],
-  [42, 48, 2, 4],
-  [46, 52, 2, 12],
-];
-
-function regionPixels(ctx, region, sx, sy) {
-  const [x, y, width, height] = region;
-  return ctx.getImageData(
-    Math.floor(x * sx),
-    Math.floor(y * sy),
-    Math.floor(width * sx),
-    Math.floor(height * sy),
-  ).data;
-}
-
-function hasTransparency(ctx, region, sx, sy) {
-  const pixels = regionPixels(ctx, region, sx, sy);
-  for (let i = 3; i < pixels.length; i += 4) {
-    if (pixels[i] !== 255) return true;
-  }
-  return false;
-}
-
-function isOpaqueColor(ctx, region, sx, sy, red, green, blue) {
-  const pixels = regionPixels(ctx, region, sx, sy);
-  for (let i = 0; i < pixels.length; i += 4) {
-    if (pixels[i] !== red || pixels[i + 1] !== green || pixels[i + 2] !== blue || pixels[i + 3] !== 255) {
-      return false;
-    }
-  }
-  return true;
-}
-
 /**
- * Determine the arm model from a decoded skin image.
- *
- * The legacy 64×32 layout has no reliable slim/wide marker, so it deliberately
- * stays wide. For square skins this mirrors skinview3d's calibrated
- * loadSkin(..., { model: "auto-detect" }) heuristic, including its solid
- * black/white fallback for templates whose marker column is filled instead of
- * transparent.
+ * Проверяет файл как фото: поддерживаемый формат, изображение декодируется,
+ * у него реальные размеры и он не превышает лимит по мегапикселям.
  */
-export function detectSkinModel(img, width, height) {
-  if (height * 2 === width) return "wide";
-  if (!img || width !== height || width < 64 || width % 64 !== 0) return "wide";
-
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return "wide";
-  ctx.drawImage(img, 0, 0, width, height);
-
-  const sx = width / 64;
-  const sy = height / 64;
-  const slim =
-    MODEL_REGIONS.some((region) => hasTransparency(ctx, region, sx, sy)) ||
-    MODEL_REGIONS.every((region) => isOpaqueColor(ctx, region, sx, sy, 0, 0, 0)) ||
-    MODEL_REGIONS.every((region) => isOpaqueColor(ctx, region, sx, sy, 255, 255, 255));
-  return slim ? "slim" : "wide";
-}
-
-export async function inspectSkinFile(entry) {
+export async function inspectPhotoFile(entry) {
   const file = entry.file;
-  const name = file.name || "unnamed.png";
+  const name = file.name || "unnamed.jpg";
   const relativePath = entry.relativePath || file.webkitRelativePath || name;
 
-  if (!isPngFile(file)) {
+  if (!isImageFile(file)) {
     return {
       ok: false,
       name,
       relativePath,
-      reason: "Не PNG",
+      reason: "Не изображение (поддерживаются PNG, JPG, WebP, GIF, BMP, AVIF, TIFF)",
     };
   }
 
   let measured = null;
   try {
     measured = await measureImage(file);
-    const { width, height, previewUrl, img } = measured;
-    if (!isValidSkinSize(width, height)) {
+    const { width, height, previewUrl } = measured;
+    if (!width || !height) {
+      URL.revokeObjectURL(previewUrl);
+      return { ok: false, name, relativePath, reason: "Пустое изображение" };
+    }
+    if (width * height > MAX_PIXELS) {
       URL.revokeObjectURL(previewUrl);
       return {
         ok: false,
         name,
         relativePath,
-        reason: `Неверный размер ${width}×${height}`,
+        reason: `Слишком большое разрешение: ${(width * height) / 1e6 | 0} Мп при лимите ${MAX_PIXELS / 1e6 | 0} Мп`,
       };
     }
 
     return {
       ok: true,
-      skin: {
+      photo: {
         id: makeId(),
         name,
         relativePath,
@@ -156,7 +120,6 @@ export async function inspectSkinFile(entry) {
         height,
         fileHandle: entry.fileHandle || null,
         dirHandle: entry.dirHandle || null,
-        model: detectSkinModel(img, width, height),
         ratings: emptyRatings(),
         thumb: null,
         note: "",
@@ -279,8 +242,10 @@ export async function pickFilesWithFs() {
     multiple: true,
     types: [
       {
-        description: "Minecraft skins",
-        accept: { "image/png": [".png"] },
+        description: "Фото",
+        accept: {
+          "image/*": [".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".avif", ".tif", ".tiff"],
+        },
       },
     ],
     excludeAcceptAllOption: false,
@@ -312,19 +277,19 @@ export function filesFromInput(fileList) {
 // это ограничение веб-платформы. showDirectoryPicker — это диалог ВЫБОРА папки, а не
 // «открыть в проводнике», поэтому он здесь больше не используется. Вместо этого
 // возвращаем известный путь к файлу/папке, чтобы пользователь мог его скопировать.
-export function revealSkin(skin) {
-  const relativePath = skin?.relativePath || skin?.name || "";
+export function revealPhoto(photo) {
+  const relativePath = photo?.relativePath || photo?.name || "";
   const sep = relativePath.lastIndexOf("/");
   const dirPath = sep >= 0 ? relativePath.slice(0, sep) : "";
   return {
     mode: "path",
-    path: relativePath || skin?.name || "",
+    path: relativePath || photo?.name || "",
     // Папка: если есть вложенность — берём её, иначе показываем хотя бы имя файла.
     dirPath: dirPath || relativePath || "",
-    name: skin?.name || "",
+    name: photo?.name || "",
   };
 }
 
-export function revokeSkin(skin) {
-  if (skin?.url) URL.revokeObjectURL(skin.url);
+export function revokePhoto(photo) {
+  if (photo?.url) URL.revokeObjectURL(photo.url);
 }
