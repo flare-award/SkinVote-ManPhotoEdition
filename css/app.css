@@ -30,13 +30,13 @@
   --display: "Outfit", "Manrope", sans-serif;
   /* Акценты категорий оценки. Ключ совпадает с data-key карточки/строки,
      поэтому цвет задаётся один раз в [data-key="…"] ниже. */
-  --cat-hair: #d98a3d;
-  --cat-eyes: #57a8ff;
-  --cat-face: #f492b3;
-  --cat-skin-shading: #e8c36a;
-  --cat-top-clothes: #7ee0c4;
-  --cat-bottom-clothes: #b4c0ff;
-  --cat-shoes: #b78bf2;
+  --cat-composition: #f492b3;
+  --cat-lighting: #e8c36a;
+  --cat-color: #7ee0c4;
+  --cat-sharpness: #57a8ff;
+  --cat-detail: #b4c0ff;
+  --cat-emotion: #ff8b7a;
+  --cat-atmosphere: #b78bf2;
 }
 
 * {
@@ -434,6 +434,16 @@ p {
   font-size: 0.86rem;
 }
 
+.chip-thumb {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  object-fit: cover;
+  flex: 0 0 auto;
+  background: var(--surface-high);
+  display: block;
+}
+
 .chip span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -541,30 +551,43 @@ p {
   font-size: 0.9rem;
 }
 
-.model-switch {
+.zoom-controls {
   display: flex;
+  align-items: center;
+  gap: 2px;
   padding: 4px;
   border-radius: 999px;
   background: var(--surface-high);
-  gap: 2px;
 }
 
-.seg {
-  min-height: 36px;
-  padding: 0 16px;
+.zoom-btn {
+  width: 36px;
+  height: 36px;
   border-radius: 999px;
+  display: grid;
+  place-items: center;
   color: var(--muted);
-  font-weight: 700;
+  transition:
+    color 140ms var(--ease-std),
+    background 140ms var(--ease-std);
 }
 
-.seg:hover {
+.zoom-btn:hover {
   color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
 }
 
-.seg.is-active {
-  background: var(--periwinkle);
-  color: #1b2140;
-  box-shadow: 0 6px 16px rgba(180, 192, 255, 0.2);
+.zoom-btn:active {
+  transform: scale(0.94);
+}
+
+.zoom-level {
+  min-width: 58px;
+  text-align: center;
+  color: var(--ink-soft);
+  font-weight: 800;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .viewer-stage {
@@ -577,10 +600,71 @@ p {
     radial-gradient(ellipse at 50% 38%, #2a2d3f 0%, #14151c 68%);
 }
 
-.viewer-stage canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
+/* 2D-вьюер фото: сцена-контейнер + absolutely-положенный <img> с
+   transform: translate + scale. Никакой деформации — только перенос и масштаб. */
+.photo-stage {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  outline: none;
+}
+
+.photo-stage.is-dragging {
+  cursor: grabbing;
+}
+
+.photo-stage:focus-visible {
+  box-shadow: inset 0 0 0 3px rgba(180, 192, 255, 0.45);
+}
+
+.photo-stage-img {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  max-width: none;
+  pointer-events: none; /* все жесты ловит сама сцена */
+  opacity: 0;
+  transition: opacity 220ms var(--ease-std);
+  will-change: transform;
+  -webkit-user-drag: none;
+}
+
+.photo-stage-img.is-ready {
+  opacity: 1;
+}
+
+.photo-stage-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--muted);
+  font-weight: 600;
+  text-align: center;
+}
+
+.photo-stage-empty[hidden] {
+  display: none !important;
+}
+
+.zoom-chip {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(10, 11, 16, 0.72);
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(6px);
+  pointer-events: none;
 }
 
 .viewer-hint {
@@ -644,13 +728,13 @@ p {
 
 /* Цвет категории: одна строка на категорию, дальше --cat-color наследуется
    и точкой-маркером, и звёздами (и в карточке оценки, и в детальном просмотре). */
-[data-key="hair"] { --cat-color: var(--cat-hair); }
-[data-key="eyes"] { --cat-color: var(--cat-eyes); }
-[data-key="face"] { --cat-color: var(--cat-face); }
-[data-key="skinShading"] { --cat-color: var(--cat-skin-shading); }
-[data-key="topClothes"] { --cat-color: var(--cat-top-clothes); }
-[data-key="bottomClothes"] { --cat-color: var(--cat-bottom-clothes); }
-[data-key="shoes"] { --cat-color: var(--cat-shoes); }
+[data-key="composition"] { --cat-color: var(--cat-composition); }
+[data-key="lighting"] { --cat-color: var(--cat-lighting); }
+[data-key="color"] { --cat-color: var(--cat-color); }
+[data-key="sharpness"] { --cat-color: var(--cat-sharpness); }
+[data-key="detail"] { --cat-color: var(--cat-detail); }
+[data-key="emotion"] { --cat-color: var(--cat-emotion); }
+[data-key="atmosphere"] { --cat-color: var(--cat-atmosphere); }
 
 .swatch {
   width: 10px;
@@ -944,12 +1028,6 @@ p {
   background: radial-gradient(ellipse at 50% 40%, #2a2d3f 0%, #14151c 70%);
 }
 
-.podium-stage canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
 .podium-name {
   margin-top: 8px;
   text-align: center;
@@ -1043,18 +1121,18 @@ p {
 .place-badge.silver { background: rgba(215, 220, 232, 0.14); }
 .place-badge.bronze { background: rgba(215, 160, 122, 0.16); color: #e0b08a; }
 
-.skin-cell {
+.photo-cell {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 170px;
+  min-width: 190px;
 }
 
 .thumb-wrap {
-  width: 64px;
-  height: 84px;
+  width: 80px;
+  height: 56px;
   flex: 0 0 auto;
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
   background: #12131a;
   position: relative;
@@ -1068,7 +1146,7 @@ p {
 }
 
 .thumb-wrap:focus-visible,
-.skin-name:focus-visible {
+.photo-name:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px rgba(180, 192, 255, 0.42);
 }
@@ -1080,8 +1158,8 @@ p {
   display: block;
 }
 
-.skin-name {
-  max-width: 190px;
+.photo-name {
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1090,7 +1168,7 @@ p {
   cursor: pointer;
 }
 
-.skin-name:hover {
+.photo-name:hover {
   color: var(--ink);
 }
 
@@ -1257,7 +1335,8 @@ p {
   min-height: 0;
 }
 
-.detail-stage {
+/* Обёртка: позиционирование рамки + плейсхолдер поверх сцены, когда файла нет. */
+.detail-stage-wrap {
   position: relative;
   height: min(62vh, 620px);
   min-height: 420px;
@@ -1266,15 +1345,19 @@ p {
   background: radial-gradient(ellipse at 50% 38%, #2a2d3f 0%, #14151c 68%);
 }
 
-.detail-stage canvas,
-.detail-placeholder {
-  display: block;
-  width: 100%;
-  height: 100%;
+.detail-stage {
+  position: absolute;
+  inset: 0;
 }
 
 .detail-placeholder {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+  pointer-events: none;
 }
 
 .detail-panel {
@@ -1480,7 +1563,7 @@ p {
     grid-template-columns: 1fr;
   }
 
-  .detail-stage {
+  .detail-stage-wrap {
     height: 52vh;
     min-height: 300px;
   }
@@ -1573,12 +1656,6 @@ p {
   background: radial-gradient(ellipse at 50% 40%, #2a2d3f 0%, #14151c 70%);
 }
 
-.tiebreak-stage canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-
 .tiebreak-name {
   margin-top: 10px;
   font-weight: 800;
@@ -1633,7 +1710,7 @@ p {
   flex-wrap: wrap;
 }
 
-/* === Подиум: плейсхолдер для скинов без файла (Task 3/4) === */
+/* === Подиум: превью фото (cover-кроп) и плейсхолдер для фото без файла === */
 .podium-ph {
   width: 100%;
   height: 100%;
