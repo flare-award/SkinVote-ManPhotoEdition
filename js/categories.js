@@ -5,13 +5,12 @@
 // (цвета задаются в css/app.css по ключу категории).
 
 export const CATEGORIES = [
-  { key: "composition", label: "Композиция" },
-  { key: "lighting", label: "Свет" },
-  { key: "color", label: "Цвет" },
-  { key: "sharpness", label: "Резкость" },
-  { key: "detail", label: "Детализация" },
-  { key: "emotion", label: "Эмоция" },
-  { key: "atmosphere", label: "Атмосфера" },
+  { key: "hairstyle", label: "Причёска" },
+  { key: "eyeColor", label: "Цвет глаз" },
+  { key: "topClothes", label: "Верхняя одежда" },
+  { key: "bottomClothes", label: "Нижняя одежда" },
+  { key: "shoes", label: "Обувь" },
+  { key: "accessories", label: "Аксессуары" },
 ];
 
 export const CATEGORY_KEYS = CATEGORIES.map((cat) => cat.key);

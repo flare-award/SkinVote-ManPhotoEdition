@@ -30,13 +30,12 @@
   --display: "Outfit", "Manrope", sans-serif;
   /* Акценты категорий оценки. Ключ совпадает с data-key карточки/строки,
      поэтому цвет задаётся один раз в [data-key="…"] ниже. */
-  --cat-composition: #f492b3;
-  --cat-lighting: #e8c36a;
-  --cat-color: #7ee0c4;
-  --cat-sharpness: #57a8ff;
-  --cat-detail: #b4c0ff;
-  --cat-emotion: #ff8b7a;
-  --cat-atmosphere: #b78bf2;
+  --cat-hairstyle: #f492b3;
+  --cat-eye-color: #57a8ff;
+  --cat-top-clothes: #e8c36a;
+  --cat-bottom-clothes: #b4c0ff;
+  --cat-shoes: #ff8b7a;
+  --cat-accessories: #7ee0c4;
 }
 
 * {
@@ -728,13 +727,12 @@ p {
 
 /* Цвет категории: одна строка на категорию, дальше --cat-color наследуется
    и точкой-маркером, и звёздами (и в карточке оценки, и в детальном просмотре). */
-[data-key="composition"] { --cat-color: var(--cat-composition); }
-[data-key="lighting"] { --cat-color: var(--cat-lighting); }
-[data-key="color"] { --cat-color: var(--cat-color); }
-[data-key="sharpness"] { --cat-color: var(--cat-sharpness); }
-[data-key="detail"] { --cat-color: var(--cat-detail); }
-[data-key="emotion"] { --cat-color: var(--cat-emotion); }
-[data-key="atmosphere"] { --cat-color: var(--cat-atmosphere); }
+[data-key="hairstyle"] { --cat-color: var(--cat-hairstyle); }
+[data-key="eyeColor"] { --cat-color: var(--cat-eye-color); }
+[data-key="topClothes"] { --cat-color: var(--cat-top-clothes); }
+[data-key="bottomClothes"] { --cat-color: var(--cat-bottom-clothes); }
+[data-key="shoes"] { --cat-color: var(--cat-shoes); }
+[data-key="accessories"] { --cat-color: var(--cat-accessories); }
 
 .swatch {
   width: 10px;
