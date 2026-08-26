@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b0c10" />
+    <meta
+      name="description"
+      content="SkinVote — локальная визуальная оценка скинов Minecraft. 3D-просмотр, рейтинг по категориям и таблица лидеров. Без загрузки на сервер."
+    />
+    <title>SkinVote — оценка скинов Minecraft</title>
+    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./css/app.css" />
+  </head>
+  <body>
+    <div class="app-bg" aria-hidden="true"></div>
+
+    <div id="app" class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" width="28" height="28">
+              <rect x="4" y="4" width="10" height="10" rx="2.4" fill="#e8c36a" />
+              <rect x="18" y="4" width="10" height="10" rx="2.4" fill="#b4c0ff" />
+              <rect x="4" y="18" width="10" height="10" rx="2.4" fill="#7ee0c4" />
+              <rect x="18" y="18" width="10" height="10" rx="2.4" fill="#ff8b7a" />
+            </svg>
+          </span>
+          <div class="brand-text">
+            <strong>SkinVote</strong>
+            <span>локальная оценка скинов</span>
+          </div>
+        </div>
+        <div class="topbar-meta" id="topbar-meta"></div>
+      </header>
+
+      <!-- UPLOAD -->
+      <section id="screen-upload" class="screen is-active" data-screen="upload">
+        <div class="upload-wrap">
+          <div class="hero-copy">
+            <p class="eyebrow">Minecraft · 3D · только локально</p>
+            <h1>Оцените пак скинов<br />как на судейском столе</h1>
+            <p class="lede">
+              Перетащите папку или PNG-файлы. Скины остаются на вашем компьютере:
+              рендер, оценки и таблица лидеров считаются прямо в браузере.
+            </p>
+          </div>
+
+          <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Зона загрузки скинов">
+            <div class="dropzone-glow" aria-hidden="true"></div>
+            <div class="dropzone-icon" aria-hidden="true">
+              <svg viewBox="0 0 48 48" width="48" height="48">
+                <path
+                  d="M24 8v22M24 8l-7 7M24 8l7 7M10 32v4a4 4 0 0 0 4 4h20a4 4 0 0 0 4-4v-4"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.4"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </div>
+            <h2>Перетащите папку или PNG-скины</h2>
+            <p>Поддерживаются классические и HD-скины Minecraft (64×32, 64×64 и кратные)</p>
+            <div class="dropzone-actions">
+              <button type="button" class="btn btn-tonal" id="btn-pick-files">
+                <span class="btn-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path
+                      fill="currentColor"
+                      d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm0 2.5L17.5 8H14zM8 13h8v2H8zm0 4h8v2H8z"
+                    />
+                  </svg>
+                </span>
+                Выбрать файлы
+              </button>
+              <button type="button" class="btn btn-tonal" id="btn-pick-folder">
+                <span class="btn-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path
+                      fill="currentColor"
+                      d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"
+                    />
+                  </svg>
+                </span>
+                Выбрать папку
+              </button>
+              <button type="button" class="btn btn-outlined" id="btn-import">
+                <span class="btn-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18">
+                    <path
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M12 3v12M12 15l-4-4M12 15l4-4M5 19h14"
+                    />
+                  </svg>
+                </span>
+                Загрузить оценки
+              </button>
+            </div>
+          </div>
+
+          <div id="upload-summary" class="upload-summary" hidden>
+            <div class="summary-head">
+              <div>
+                <h3 id="valid-count">Найдено 0 валидных скинов</h3>
+                <p id="skip-count" class="muted"></p>
+              </div>
+              <button type="button" class="btn btn-text" id="btn-clear-all">Очистить всё</button>
+            </div>
+
+            <div class="chip-scroller" id="valid-list"></div>
+
+            <div id="invalid-block" class="invalid-block" hidden>
+              <div class="invalid-head">
+                <h4>Не удалось принять</h4>
+                <button type="button" class="btn btn-text" id="btn-clear-invalid">Убрать ошибочные</button>
+              </div>
+              <ul id="invalid-list" class="invalid-list"></ul>
+            </div>
+
+            <div class="summary-cta">
+              <button type="button" class="btn btn-filled btn-lg" id="btn-start" disabled>
+                Начать
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RATE -->
+      <section id="screen-rate" class="screen" data-screen="rate" hidden>
+        <div class="rate-layout">
+          <article class="viewer-card">
+            <div class="viewer-toolbar">
+              <div class="file-pill" id="current-name" title="">skin.png</div>
+              <div class="model-switch" role="group" aria-label="Тип модели">
+                <button type="button" class="seg" data-model="slim" id="btn-slim">Slim</button>
+                <button type="button" class="seg is-active" data-model="wide" id="btn-wide">Wide</button>
+              </div>
+            </div>
+            <div class="viewer-stage" id="rate-stage">
+              <canvas id="rate-canvas"></canvas>
+            </div>
+            <p class="viewer-hint">ЛКМ — вращение · ПКМ — сдвиг · колесо — масштаб</p>
+          </article>
+
+          <aside class="rate-panel">
+            <div class="panel-kicker">
+              <span id="rate-progress">Скин 1 из 1</span>
+              <span class="kicker-dot" aria-hidden="true"></span>
+              <span id="rate-kicker-cats">7 категорий</span>
+            </div>
+
+            <div id="categories" class="categories"></div>
+
+            <div class="total-score" id="total-score">
+              <span class="total-label">Итоговая оценка</span>
+              <strong id="total-value">—/10</strong>
+            </div>
+          </aside>
+        </div>
+
+        <div class="rate-nav">
+          <button type="button" class="btn btn-outlined btn-lg" id="btn-prev" disabled>
+            Предыдущий
+          </button>
+          <button type="button" class="btn btn-tonal btn-lg" id="btn-skip">
+            Пропустить
+          </button>
+          <button type="button" class="btn btn-filled btn-lg" id="btn-next" disabled>
+            Следующий
+          </button>
+        </div>
+      </section>
+
+      <!-- LEADERBOARD -->
+      <section id="screen-board" class="screen" data-screen="board" hidden>
+        <div class="board-head">
+          <div>
+            <p class="eyebrow">Итоги сессии</p>
+            <h2>Таблица лидеров</h2>
+          </div>
+          <div class="board-actions">
+            <label class="sort-control" for="board-sort">
+              <span>Сортировка</span>
+              <!-- Опции строятся в js/app.js: «Общая оценка» + все категории. -->
+              <select id="board-sort" aria-label="Сортировка таблицы лидеров"></select>
+            </label>
+            <button
+              type="button"
+              class="btn btn-outlined"
+              id="btn-toggle-filters"
+              aria-expanded="false"
+              aria-controls="board-filters"
+            >
+              <span class="btn-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                  <path
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M4 5h16M7 12h10M10 19h4"
+                  />
+                </svg>
+              </span>
+              <span class="btn-label">Фильтры</span>
+            </button>
+            <button type="button" class="btn btn-outlined" id="btn-export">
+              <span class="btn-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="18" height="18">
+                  <path
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M12 3v12M12 15l4-4M12 15l-4-4M5 19h14"
+                  />
+                </svg>
+              </span>
+              Сохранить оценки
+            </button>
+            <button type="button" class="btn btn-outlined" id="btn-back-rate">Вернуться к оценкам</button>
+            <button type="button" class="btn btn-tonal" id="btn-new-session">Новая сессия</button>
+          </div>
+        </div>
+
+        <div id="board-filters" class="board-filters" aria-label="Фильтры таблицы лидеров" hidden>
+          <label class="filter-field filter-search" for="board-search">
+            <span class="filter-label">Поиск</span>
+            <input type="search" id="board-search" placeholder="Поиск по имени…" autocomplete="off" />
+          </label>
+
+          <fieldset class="filter-field filter-score">
+            <legend class="filter-label">Итоговый балл</legend>
+            <div class="filter-range">
+              <label for="board-min-score">
+                <span>от</span>
+                <input id="board-min-score" type="number" min="1" max="10" step="0.1" placeholder="1" />
+              </label>
+              <label for="board-max-score">
+                <span>до</span>
+                <input id="board-max-score" type="number" min="1" max="10" step="0.1" placeholder="10" />
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset class="filter-field filter-categories">
+            <legend class="filter-label">Минимум по категории</legend>
+            <!-- Селекты «минимум по категории» строятся в js/app.js из CATEGORIES. -->
+            <div class="category-filters" id="category-filters"></div>
+          </fieldset>
+
+          <button type="button" class="btn btn-text filter-reset" id="btn-reset-filters">Сбросить фильтры</button>
+        </div>
+
+        <div class="board-layout">
+          <div class="podium" id="podium"></div>
+          <div class="table-card">
+            <div class="table-scroll">
+              <table class="lb-table">
+                <thead>
+                  <!-- Столбцы строятся в js/app.js: Место / Скин / Итог / категории / действия. -->
+                  <tr id="lb-head"></tr>
+                </thead>
+                <tbody id="lb-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TIEBREAK -->
+      <section id="screen-tiebreak" class="screen" data-screen="tiebreak" hidden>
+        <div class="tiebreak-head">
+          <p class="eyebrow">Ничья в топ-8</p>
+          <h2>Какой скин лучше?</h2>
+          <p class="muted" id="tiebreak-info">Сравните скины с одинаковым баллом и выберите лучший.</p>
+        </div>
+        <div class="tiebreak-arena">
+          <button type="button" class="tiebreak-card" id="tiebreak-left" aria-label="Выбрать левый скин">
+            <div class="tiebreak-stage"><canvas></canvas></div>
+            <div class="tiebreak-name"></div>
+            <div class="tiebreak-score"></div>
+            <span class="tiebreak-pick">Выбрать</span>
+          </button>
+          <div class="tiebreak-vs" aria-hidden="true">VS</div>
+          <button type="button" class="tiebreak-card" id="tiebreak-right" aria-label="Выбрать правый скин">
+            <div class="tiebreak-stage"><canvas></canvas></div>
+            <div class="tiebreak-name"></div>
+            <div class="tiebreak-score"></div>
+            <span class="tiebreak-pick">Выбрать</span>
+          </button>
+        </div>
+        <div class="tiebreak-nav">
+          <span class="muted">Тейбрейкер определяет только порядок при равных баллах — оценки не меняются.</span>
+          <button type="button" class="btn btn-text" id="btn-tiebreak-skip">Оставить порядок как есть</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="toast" class="toast" hidden role="status"></div>
+
+    <dialog id="reveal-dialog" class="sheet">
+      <form method="dialog" class="sheet-inner">
+        <h3>Расположение файла</h3>
+        <p class="muted">
+          Браузер не может открыть системный проводник и выделить там файл — это ограничение
+          веб-платформы. Скопируйте путь ниже и откройте папку вручную в проводнике.
+        </p>
+        <p class="path-label">Файл</p>
+        <p class="path-box" id="reveal-path">—</p>
+        <p class="path-label">Папка</p>
+        <p class="path-box" id="reveal-dir">—</p>
+        <div class="sheet-actions">
+          <button value="cancel" class="btn btn-text">Закрыть</button>
+          <button type="button" class="btn btn-outlined" id="btn-copy-dir">Копировать папку</button>
+          <button type="button" class="btn btn-filled" id="btn-copy-path">Копировать путь</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="import-dialog" class="sheet">
+      <form method="dialog" class="sheet-inner">
+        <h3>Загрузка оценок</h3>
+        <div id="import-preview" class="import-preview"></div>
+        <div class="sheet-actions">
+          <button value="cancel" class="btn btn-text">Отмена</button>
+          <button type="button" class="btn btn-filled" id="btn-import-confirm">Просмотреть таблицу лидеров</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="detail-dialog" class="detail-dialog">
+      <form method="dialog" class="detail-dialog-inner">
+        <div class="detail-head">
+          <div>
+            <p class="eyebrow">Детальный просмотр</p>
+            <h3 id="detail-name">—</h3>
+          </div>
+          <div class="detail-total">
+            <span>Итоговая оценка</span>
+            <strong id="detail-score">—/10</strong>
+          </div>
+        </div>
+
+        <div class="detail-layout">
+          <div class="detail-view">
+            <div class="detail-stage" id="detail-stage">
+              <canvas id="detail-canvas"></canvas>
+              <img id="detail-placeholder" class="detail-placeholder" alt="" hidden />
+            </div>
+            <p class="viewer-hint">ЛКМ — вращение · ПКМ — сдвиг · колесо — масштаб</p>
+          </div>
+
+          <aside class="detail-panel">
+            <section>
+              <h4 class="detail-section-title">Разбивка по категориям</h4>
+              <div id="detail-categories" class="detail-categories"></div>
+            </section>
+          </aside>
+        </div>
+
+        <div class="detail-actions">
+          <button value="cancel" class="btn btn-filled">Закрыть</button>
+        </div>
+      </form>
+    </dialog>
+
+    <input id="input-files" type="file" accept="image/png,.png" multiple hidden />
+    <input id="input-folder" type="file" accept="image/png,.png" webkitdirectory directory multiple hidden />
+    <input id="input-import" type="file" accept="application/json,.json" hidden />
+
+    <script src="./vendor/skinview3d.bundle.js"></script>
+    <script type="module" src="./js/app.js"></script>
+  </body>
+</html>
