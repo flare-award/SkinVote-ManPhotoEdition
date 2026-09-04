@@ -13,6 +13,16 @@ import {
 } from "./files.js";
 import { captureThumb, createPhotoViewer, disposeThumbEngine, thumbPlaceholder } from "./viewer.js";
 import {
+  backdropCssValue,
+  backdropLabel,
+  backdropTone,
+  getBackdrop,
+  parseBackdrop,
+  setBackdrop,
+  subscribeBackdrop,
+} from "./backdrop.js";
+import { createBackdropControl } from "./backdrop-ui.js";
+import {
   BUILTIN_PRESETS,
   SCALES,
   activeCategories,
@@ -171,6 +181,15 @@ const els = {
   btnPresetDelete: document.getElementById("btn-preset-delete"),
   btnPresetUpload: document.getElementById("btn-preset-upload"),
   btnSettingsReset: document.getElementById("btn-settings-reset"),
+  // Фон оцениваемого фото (панель настроек + кнопка в тулбаре просмотра)
+  settingsBackdrop: document.getElementById("settings-backdrop"),
+  backdropWrap: document.getElementById("backdrop-wrap"),
+  btnBackdrop: document.getElementById("btn-backdrop"),
+  backdropSwatch: document.getElementById("backdrop-swatch"),
+  backdropPopover: document.getElementById("backdrop-popover"),
+  backdropPopoverBody: document.getElementById("backdrop-popover-body"),
+  backdropValue: document.getElementById("backdrop-value"),
+  btnBackdropClose: document.getElementById("btn-backdrop-close"),
   inputPreset: document.getElementById("input-preset"),
   presetDialog: document.getElementById("preset-dialog"),
   presetDialogTitle: document.getElementById("preset-dialog-title"),
@@ -203,6 +222,10 @@ let tiebreakAborted = false;
 let tiebreakCompareCount = 0;
 let tiebreakGroupLabel = "";
 let pendingImport = null;
+// Контролы фона живут всё время работы приложения и синхронизируются между
+// собой через подписку на состояние (js/backdrop.js).
+let backdropPopoverControl = null;
+let backdropPopoverOpen = false;
 
 function currentPhoto() {
   const id = state.order[state.index];
@@ -234,6 +257,8 @@ function showToast(text) {
 
 function setScreen(name) {
   state.screen = name;
+  // Поповер фона живёт в тулбаре экрана оценки: при уходе с него закрываем.
+  if (name !== "rate") setBackdropPopover(false, { restoreFocus: false });
   for (const [key, node] of Object.entries(els.screens)) {
     const active = key === name;
     node.hidden = !active;
@@ -1170,14 +1195,16 @@ function newSession() {
 
 // --- Экспорт / импорт оценок ---
 
-// Версия формата: 5 — оценка фото по активному пресету категорий и активной
-// шкале (5/10/100). В файле дублируется набор категорий и шкала, чтобы импорт
-// мог восстановить тот же пресет и те же баллы.
+// Версия формата: 6 — оценка фото по активному пресету категорий и активной
+// шкале (5/10/100) плюс фон под фото (режим и свой цвет), чтобы загруженная
+// сессия открывалась так же, как её оценивали. В файле дублируется набор
+// категорий и шкала, чтобы импорт мог восстановить тот же пресет и те же баллы.
 // Более старые файлы (v1–v2 — оценка скинов, v3 — фото по категориям
 // композиция/свет/цвет/резкость/детализация/эмоция/атмосфера, v4 — фото по
-// категориям «Человека» со шкалой 10) читаются, но пресет/шкала из них не
-// восстанавливаются — превью импорта предупредит о несовпадении категорий.
-const EXPORT_VERSION = 5;
+// категориям «Человека» со шкалой 10, v5 — то же без поля фона) читаются, но
+// пресет/шкала из v1–v4 не восстанавливаются — превью импорта предупредит
+// о несовпадении категорий.
+const EXPORT_VERSION = 6;
 
 function freshId() {
   if (crypto.randomUUID) return crypto.randomUUID();
@@ -1215,6 +1242,9 @@ function exportRatings() {
     app: "photovote",
     date: new Date().toISOString(),
     scale: getScale(),
+    // Фон под фото сохраняется вместе с сессией: при загрузке файла
+    // фото будут показаны так же, как их оценивали.
+    backdrop: getBackdrop(),
     preset: {
       id: preset.id,
       label: preset.label,
@@ -1304,6 +1334,8 @@ function parseSession(text) {
     // v3+ пишет список категорий явно; у более старых файлов берём его из оценок.
     categories: Array.isArray(data.categories) ? data.categories.map((key) => String(key)) : [...fileKeys],
     scale: fileScale,
+    // У старых файлов поля нет — тогда остаётся фон, выбранный в браузере.
+    backdrop: data.backdrop && typeof data.backdrop === "object" ? parseBackdrop(data.backdrop) : null,
     preset: normalizePreset(data.preset),
     photos,
   };
@@ -1410,6 +1442,7 @@ function showImportPreview(session) {
   const settingsParts = [];
   if (session.preset) settingsParts.push(`пресет «${escapeAttr(session.preset.label)}»`);
   if (session.scale) settingsParts.push(`шкала ${session.scale}`);
+  if (session.backdrop) settingsParts.push(`фон фото «${escapeAttr(backdropLabel(session.backdrop))}»`);
   const settingsHint = settingsParts.length
     ? `<p class="muted" style="margin-top:8px">Из файла будут применены: <b>${settingsParts.join(", ")}</b>. Пресет будет доступен в настройках.</p>`
     : "";
@@ -1455,6 +1488,9 @@ function loadImportedSession(session) {
 // Применяет пресет/шкалу из файла оценок. Возвращает true, если что-то поменялось.
 function applyImportedSettings(session) {
   let changed = false;
+  // Фон не влияет на оценки, поэтому применяется молча и не требует
+  // перестройки интерфейса — контролы сами подпишутся на изменение.
+  if (session.backdrop) setBackdrop(session.backdrop);
   if (session.scale && session.scale !== getScale()) {
     setScale(session.scale);
     changed = true;
@@ -2060,6 +2096,72 @@ function bindSettings() {
   });
 }
 
+// --- Фон оцениваемого фото ---
+
+// Кнопка в тулбаре показывает текущий фон: цвет (или градиент темы) в превью
+// и название режима в подписи/подсказке.
+function refreshBackdropTrigger() {
+  const backdrop = getBackdrop();
+  const label = backdropLabel(backdrop);
+  els.backdropSwatch.style.background = backdropCssValue(backdrop);
+  els.backdropSwatch.classList.toggle("is-light", backdropTone(backdrop) === "light");
+  els.btnBackdrop.title = `Фон фото: ${label}`;
+  els.btnBackdrop.setAttribute("aria-label", `Фон фото: ${label}. Открыть выбор фона`);
+  els.backdropValue.textContent = label;
+}
+
+/**
+ * Открывает/закрывает поповер выбора фона.
+ *
+ * @param {boolean} open
+ * @param {{restoreFocus?: boolean}} [options] restoreFocus=false — не возвращать
+ *   фокус на кнопку (используется при закрытии кликом мимо: пользователь
+ *   намеренно работал с другим элементом страницы).
+ */
+function setBackdropPopover(open, options = {}) {
+  const next = !!open;
+  if (next === backdropPopoverOpen) return;
+  backdropPopoverOpen = next;
+  els.backdropPopover.hidden = !next;
+  els.btnBackdrop.setAttribute("aria-expanded", String(next));
+  if (next) {
+    // На всякий случай синхронизируем содержимое с текущим состоянием.
+    backdropPopoverControl?.refresh();
+    return;
+  }
+  // Фокус не должен оставаться в скрытом поповере.
+  const active = document.activeElement;
+  if (!(active instanceof Element) || !els.backdropPopover.contains(active)) return;
+  if (options.restoreFocus === false) active.blur();
+  else els.btnBackdrop.focus();
+}
+
+function bindBackdrop() {
+  // Один и тот же компонент в двух местах: настройки слева и поповер у фото.
+  createBackdropControl(els.settingsBackdrop, { label: "Фон оцениваемого фото" });
+  backdropPopoverControl = createBackdropControl(els.backdropPopoverBody, {
+    variant: "popover",
+    label: "Фон оцениваемого фото",
+  });
+
+  subscribeBackdrop(refreshBackdropTrigger);
+  refreshBackdropTrigger();
+
+  els.btnBackdrop.addEventListener("click", () => setBackdropPopover(!backdropPopoverOpen));
+  els.btnBackdropClose.addEventListener("click", () => setBackdropPopover(false));
+
+  // Клик вне поповера и Escape закрывают его.
+  document.addEventListener("pointerdown", (event) => {
+    if (!backdropPopoverOpen) return;
+    if (els.backdropWrap.contains(event.target)) return;
+    setBackdropPopover(false, { restoreFocus: false });
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !backdropPopoverOpen) return;
+    setBackdropPopover(false);
+  });
+}
+
 function bindRate() {
   // Всё, что зависит от набора категорий, строится из активного пресета.
   buildRateKicker();
@@ -2069,6 +2171,7 @@ function bindRate() {
   buildTableHead();
   syncScoreFilterAttrs();
   bindSettings();
+  bindBackdrop();
   els.btnPrev.addEventListener("click", goPrev);
   els.btnNext.addEventListener("click", goNext);
   els.btnSkip.addEventListener("click", skipCurrent);
@@ -2133,6 +2236,10 @@ function bindRate() {
 
   window.addEventListener("keydown", (event) => {
     if (state.screen !== "rate") return;
+    // В полях ввода (HEX-код фона, название пресета, ползунки HSV) клавиши
+    // принадлежат полю: иначе «s» пропускало бы фото, а стрелки — листали их.
+    const typed = event.target;
+    if (typed instanceof Element && typed.closest("input, textarea, select, [contenteditable]")) return;
     // На сцене в фокусе стрелки/зумные клавиши обрабатывает сам вьюер —
     // навигация не должна дублироваться. Прочие клавиши (например, «s») — как обычно.
     const stageKeys = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "+", "=", "-", "_", "0"]);

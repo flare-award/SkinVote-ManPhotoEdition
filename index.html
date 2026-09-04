@@ -198,6 +198,16 @@
               <div class="scale-choices" id="settings-scale" role="radiogroup" aria-label="Шкала оценки"></div>
             </section>
 
+            <section class="settings-group">
+              <h4>Фон фото</h4>
+              <p class="muted">
+                Подложка за оцениваемым фото — помогает разглядеть светлые и тёмные детали.
+              </p>
+              <!-- Варианты (по умолчанию / белый / чёрный / свой цвет) и редактор
+                   цвета строятся в js/backdrop-ui.js. -->
+              <div id="settings-backdrop"></div>
+            </section>
+
             <section class="settings-group settings-note">
               <p class="muted">Смена пресета или шкалы очищает уже выставленные оценки текущей сессии.</p>
               <button type="button" class="btn btn-text btn-xs" id="btn-settings-reset">Сбросить к умолчанию</button>
@@ -207,63 +217,115 @@
           <article class="viewer-card">
             <div class="viewer-toolbar">
               <div class="file-pill" id="current-name" title="">photo.jpg</div>
-              <div class="zoom-controls" role="group" aria-label="Масштаб фото">
-                <button
-                  type="button"
-                  class="zoom-btn"
-                  id="btn-zoom-out"
-                  title="Уменьшить (−)"
-                  aria-label="Уменьшить масштаб"
-                >
-                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                    <path
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2.4"
-                      stroke-linecap="round"
-                      d="M5 12h14"
-                    />
-                  </svg>
-                </button>
-                <span class="zoom-level" id="zoom-level">100%</span>
-                <button
-                  type="button"
-                  class="zoom-btn"
-                  id="btn-zoom-in"
-                  title="Увеличить (+)"
-                  aria-label="Увеличить масштаб"
-                >
-                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
-                    <path
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2.4"
-                      stroke-linecap="round"
-                      d="M5 12h14M12 5v14"
-                    />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  class="zoom-btn"
-                  id="btn-zoom-fit"
-                  title="Вписать в рамку (0)"
-                  aria-label="Вписать фото в рамку"
-                >
-                  <svg
-                    viewBox="0 0 24 24"
-                    width="16"
-                    height="16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2.2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
+              <div class="viewer-tools">
+                <!-- Быстрое переключение фона: те же варианты, что и в настройках слева. -->
+                <div class="backdrop-wrap" id="backdrop-wrap">
+                  <button
+                    type="button"
+                    class="tool-btn"
+                    id="btn-backdrop"
+                    title="Фон фото: по умолчанию"
+                    aria-label="Фон фото: по умолчанию"
+                    aria-expanded="false"
+                    aria-controls="backdrop-popover"
                   >
-                    <path d="M9 4H5a1 1 0 0 0-1 1v4M15 4h4a1 1 0 0 1 1 1v4M9 20H5a1 1 0 0 1-1-1v-4M15 20h4a1 1 0 0 0 1-1v-4" />
-                  </svg>
-                </button>
+                    <span class="tool-swatch" id="backdrop-swatch" aria-hidden="true"></span>
+                    <span class="tool-btn-txt">Фон</span>
+                    <svg viewBox="0 0 24 24" width="14" height="14" class="tool-caret" aria-hidden="true">
+                      <path
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.4"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M6 9l6 6 6-6"
+                      />
+                    </svg>
+                  </button>
+                  <div class="bg-popover" id="backdrop-popover" hidden>
+                    <div class="bg-popover-head">
+                      <strong>Фон фото</strong>
+                      <span class="bg-popover-value" id="backdrop-value">По умолчанию</span>
+                      <button
+                        type="button"
+                        class="icon-btn bg-popover-close"
+                        id="btn-backdrop-close"
+                        aria-label="Закрыть выбор фона"
+                      >
+                        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                          <path
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2.4"
+                            stroke-linecap="round"
+                            d="M6 6l12 12M18 6L6 18"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                    <!-- Варианты и редактор цвета строит js/backdrop-ui.js. -->
+                    <div id="backdrop-popover-body"></div>
+                  </div>
+                </div>
+
+                <div class="zoom-controls" role="group" aria-label="Масштаб фото">
+                  <button
+                    type="button"
+                    class="zoom-btn"
+                    id="btn-zoom-out"
+                    title="Уменьшить (−)"
+                    aria-label="Уменьшить масштаб"
+                  >
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                      <path
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.4"
+                        stroke-linecap="round"
+                        d="M5 12h14"
+                      />
+                    </svg>
+                  </button>
+                  <span class="zoom-level" id="zoom-level">100%</span>
+                  <button
+                    type="button"
+                    class="zoom-btn"
+                    id="btn-zoom-in"
+                    title="Увеличить (+)"
+                    aria-label="Увеличить масштаб"
+                  >
+                    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                      <path
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.4"
+                        stroke-linecap="round"
+                        d="M5 12h14M12 5v14"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    type="button"
+                    class="zoom-btn"
+                    id="btn-zoom-fit"
+                    title="Вписать в рамку (0)"
+                    aria-label="Вписать фото в рамку"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="16"
+                      height="16"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M9 4H5a1 1 0 0 0-1 1v4M15 4h4a1 1 0 0 1 1 1v4M9 20H5a1 1 0 0 1-1-1v-4M15 20h4a1 1 0 0 0 1-1v-4" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
             <div class="viewer-stage" id="rate-stage"></div>

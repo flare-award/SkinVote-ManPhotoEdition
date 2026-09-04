@@ -596,8 +596,9 @@ p {
   min-height: 280px;
   border-radius: 24px;
   overflow: hidden;
-  background:
-    radial-gradient(ellipse at 50% 38%, #2a2d3f 0%, #14151c 68%);
+  /* --stage-bg задаётся на <html> из js/backdrop.js; без него — градиент темы. */
+  background: var(--stage-bg, radial-gradient(ellipse at 50% 38%, #2a2d3f 0%, #14151c 68%));
+  transition: background-color 200ms var(--ease-std);
 }
 
 /* 2D-вьюер фото: сцена-контейнер + absolutely-положенный <img> с
@@ -1341,7 +1342,8 @@ p {
   min-height: 420px;
   border-radius: var(--r-lg);
   overflow: hidden;
-  background: radial-gradient(ellipse at 50% 38%, #2a2d3f 0%, #14151c 68%);
+  background: var(--stage-bg, radial-gradient(ellipse at 50% 38%, #2a2d3f 0%, #14151c 68%));
+  transition: background-color 200ms var(--ease-std);
 }
 
 .detail-stage {
@@ -2012,7 +2014,8 @@ p {
   min-height: 240px;
   border-radius: 20px;
   overflow: hidden;
-  background: radial-gradient(ellipse at 50% 40%, #2a2d3f 0%, #14151c 70%);
+  background: var(--stage-bg, radial-gradient(ellipse at 50% 40%, #2a2d3f 0%, #14151c 70%));
+  transition: background-color 200ms var(--ease-std);
 }
 
 .tiebreak-name {
@@ -2112,5 +2115,560 @@ p {
   .tiebreak-nav {
     justify-content: center;
     text-align: center;
+  }
+}
+
+/* === Фон фото (подложка сцены просмотра) === */
+/* Состояние хранит js/backdrop.js: он выставляет --stage-bg и data-stage-tone
+   на <html>, поэтому все сцены (оценка, тейбрейкер, детальный просмотр)
+   перекрашиваются одновременно. Разметку контрола строит js/backdrop-ui.js. */
+
+/* Светлая подложка (белая или свой светлый цвет): подписи поверх сцены,
+   кольцо фокуса и чип масштаба переключаются на тёмные, иначе они
+   теряются на белом. */
+html[data-stage-tone="light"] .photo-stage-empty {
+  color: #55565f;
+}
+
+html[data-stage-tone="light"] .photo-stage:focus-visible {
+  box-shadow: inset 0 0 0 3px rgba(23, 24, 33, 0.35);
+}
+
+html[data-stage-tone="light"] .viewer-stage,
+html[data-stage-tone="light"] .detail-stage-wrap,
+html[data-stage-tone="light"] .tiebreak-stage {
+  /* Тонкая окантовка: белое фото не сливается с краями сцены. */
+  box-shadow: inset 0 0 0 1px rgba(11, 12, 16, 0.16);
+}
+
+html[data-stage-tone="light"] .zoom-chip {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(11, 12, 16, 0.16);
+  color: #23242e;
+}
+
+/* --- Кнопка «Фон» в тулбаре окна просмотра --- */
+.viewer-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.backdrop-wrap {
+  position: relative;
+}
+
+.tool-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 11px 0 9px;
+  border-radius: 999px;
+  background: var(--surface-high);
+  color: var(--ink-soft);
+  font-weight: 700;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  transition:
+    background 140ms var(--ease-std),
+    color 140ms var(--ease-std),
+    box-shadow 140ms var(--ease-std);
+}
+
+.tool-btn:hover {
+  background: #232432;
+  color: var(--ink);
+}
+
+.tool-btn[aria-expanded="true"] {
+  background: #232432;
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.tool-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(180, 192, 255, 0.35);
+}
+
+/* Превью текущего фона: цвет или градиент темы. */
+.tool-swatch {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  border: 1px solid rgba(243, 238, 248, 0.2);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.tool-swatch.is-light {
+  border-color: rgba(11, 12, 16, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(11, 12, 16, 0.12);
+}
+
+.tool-caret {
+  flex: 0 0 auto;
+  color: var(--muted);
+  transition: transform 180ms var(--ease-std);
+}
+
+.tool-btn[aria-expanded="true"] .tool-caret {
+  transform: rotate(180deg);
+}
+
+/* --- Поповер быстрого выбора фона --- */
+.bg-popover {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 10px);
+  right: 0;
+  width: min(340px, calc(100vw - 40px));
+  /* На низком экране поповер прокручивается, а не уезжает за вьюпорт. */
+  max-height: min(72vh, 620px);
+  overflow: auto;
+  padding: 14px;
+  border-radius: 20px;
+  background: var(--bg-elev);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow);
+  animation: bg-popover-in 180ms var(--ease-out);
+}
+
+.bg-popover[hidden] {
+  display: none !important;
+}
+
+@keyframes bg-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.bg-popover-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.bg-popover-head strong {
+  font-family: var(--display);
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
+}
+
+.bg-popover-value {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bg-popover-close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+}
+
+/* --- Контрол: четыре режима + редактор своего цвета --- */
+.backdrop-control {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bg-choices {
+  display: grid;
+  gap: 8px;
+}
+
+.bg-choice {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: var(--surface-high);
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  transition:
+    border-color 160ms var(--ease-std),
+    background 160ms var(--ease-std);
+}
+
+.bg-choice:hover {
+  background: #20212e;
+}
+
+.bg-choice.is-active {
+  border-color: rgba(232, 195, 106, 0.55);
+  background: rgba(232, 195, 106, 0.07);
+}
+
+.bg-choice:focus-within {
+  box-shadow: 0 0 0 3px rgba(180, 192, 255, 0.22);
+}
+
+.bg-choice input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bg-swatch {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  border-radius: 9px;
+  border: 1px solid rgba(243, 238, 248, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.bg-swatch.is-light {
+  border-color: rgba(11, 12, 16, 0.3);
+  box-shadow: inset 0 0 0 1px rgba(11, 12, 16, 0.12);
+}
+
+.bg-choice-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.88rem;
+  line-height: 1.2;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Значение варианта справа: подпись режима или текущий HEX своего цвета. */
+.bg-choice-cap {
+  flex: 0 0 auto;
+  font-style: normal;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.bg-choice.is-active .bg-choice-cap {
+  color: var(--gold);
+}
+
+/* --- Редактор своего цвета --- */
+.bg-editor {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(11, 12, 16, 0.35);
+  border: 1px solid var(--line);
+  animation: bg-editor-in 200ms var(--ease-out);
+}
+
+.bg-editor[hidden] {
+  display: none !important;
+}
+
+@keyframes bg-editor-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.bg-editor-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+/* Системная палитра: <input type="color"> растянут за пределы рамки,
+   чтобы родные поля браузера не съедали превью цвета. */
+.bg-picker {
+  position: relative;
+  flex: 0 0 auto;
+  width: 54px;
+  height: 44px;
+  border-radius: 13px;
+  overflow: hidden;
+  background: var(--surface-high);
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+  transition: border-color 160ms var(--ease-std);
+}
+
+.bg-picker:hover {
+  border-color: rgba(232, 195, 106, 0.5);
+}
+
+.bg-picker:focus-within {
+  box-shadow: 0 0 0 3px rgba(180, 192, 255, 0.22);
+}
+
+.bg-picker input[type="color"] {
+  position: absolute;
+  inset: -8px;
+  width: calc(100% + 16px);
+  height: calc(100% + 16px);
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.bg-picker input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.bg-picker input[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: 0;
+}
+
+.bg-picker input[type="color"]::-moz-color-swatch {
+  border: 0;
+}
+
+/* Поле HEX-кода */
+.bg-hex {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 44px;
+  padding: 0 12px;
+  border-radius: 13px;
+  background: var(--surface-high);
+  border: 1px solid var(--line-strong);
+  transition: border-color 160ms var(--ease-std);
+}
+
+.bg-hex:focus-within {
+  border-color: rgba(232, 195, 106, 0.55);
+}
+
+.bg-hex:has(input.is-invalid) {
+  border-color: rgba(255, 180, 171, 0.6);
+}
+
+.bg-hex > span {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.bg-hex input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  background: none;
+  outline: none;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 0.9rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
+.bg-hex input.is-invalid {
+  color: var(--danger);
+}
+
+.bg-hex-error {
+  margin: -4px 0 0;
+  color: var(--danger);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.bg-hex-error[hidden] {
+  display: none !important;
+}
+
+/* Ползунки HSV */
+.bg-sliders {
+  display: grid;
+  gap: 9px;
+}
+
+.bg-slider {
+  display: grid;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.bg-slider-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bg-slider-head b {
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.bg-slider-value {
+  font-style: normal;
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.bg-slider input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 16px;
+  margin: 0;
+  background: none;
+  cursor: pointer;
+  outline: none;
+}
+
+.bg-slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 12px;
+  border-radius: 999px;
+  /* Градиент дорожки пересчитывается в js/backdrop-ui.js от текущего цвета. */
+  background: var(--track, var(--surface-highest));
+  border: 1px solid rgba(0, 0, 0, 0.45);
+}
+
+.bg-slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid rgba(11, 12, 16, 0.55);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  transition: transform 120ms var(--ease-std);
+}
+
+.bg-slider input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.12);
+}
+
+.bg-slider input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 4px rgba(180, 192, 255, 0.35),
+    0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+.bg-slider input[type="range"]::-moz-range-track {
+  height: 12px;
+  border-radius: 999px;
+  background: var(--track, var(--surface-highest));
+  border: 1px solid rgba(0, 0, 0, 0.45);
+}
+
+.bg-slider input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid rgba(11, 12, 16, 0.55);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+
+.bg-slider input[type="range"]::-moz-range-progress {
+  background: transparent;
+}
+
+/* Быстрые цвета */
+.bg-quick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(24px, 1fr));
+  gap: 7px;
+}
+
+.bg-quick-swatch {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  min-height: 24px;
+  border-radius: 9px;
+  border: 1px solid rgba(243, 238, 248, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3);
+  transition:
+    transform 140ms var(--ease-std),
+    box-shadow 140ms var(--ease-std);
+}
+
+.bg-quick-swatch:hover {
+  transform: translateY(-1px) scale(1.05);
+}
+
+.bg-quick-swatch:active {
+  transform: scale(0.96);
+}
+
+.bg-quick-swatch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(180, 192, 255, 0.4);
+}
+
+.bg-quick-swatch.is-active::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 12px;
+  border: 2px solid var(--gold);
+}
+
+.bg-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 720px) {
+  .viewer-toolbar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .file-pill {
+    max-width: 100%;
+  }
+
+  .viewer-tools {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  /* На узком экране поповер раскрывается влево от края тулбара,
+     чтобы не уехать за границу вьюпорта. */
+  .bg-popover {
+    right: auto;
+    left: 0;
   }
 }
