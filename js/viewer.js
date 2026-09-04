@@ -76,7 +76,11 @@ export function createPhotoViewer(stage, options = {}) {
     chip.textContent = "100%";
   }
 
-  stage.append(img, empty, chip);
+  // ВАЖНО: Element.append() приводит не-Node аргументы к строке. Если передать
+  // сюда null (чип скрыт), в сцену добавится текстовый узел "null",
+  // который виден слева сверху в окне просмотра фото.
+  stage.append(img, empty);
+  if (chip) stage.append(chip);
 
   // --- состояние ---
   let stageW = 0;

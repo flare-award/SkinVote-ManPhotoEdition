@@ -13,16 +13,57 @@ import {
 } from "./files.js";
 import { captureThumb, createPhotoViewer, disposeThumbEngine, thumbPlaceholder } from "./viewer.js";
 import {
-  CATEGORIES,
-  CATEGORY_KEYS,
+  BUILTIN_PRESETS,
+  SCALES,
+  activeCategories,
+  activeCategoryKeys,
+  activePreset,
   categorySlug,
+  deleteCustomPreset,
   emptyRatings,
+  getScale,
+  listPresets,
+  makeCategoryKey,
+  parsePresetFile,
   pluralCategories,
+  resetSettings,
+  saveCustomPreset,
+  serializePreset,
+  setActivePresetId,
+  setScale,
 } from "./categories.js";
+
+// Палитра акцентов категорий. Цвет задаётся индексом категории в пресете,
+// поэтому работает и для пользовательских пресетов (для встроенных она
+// повторяет прежние цвета по ключам).
+const PALETTE = [
+  "#f492b3",
+  "#57a8ff",
+  "#e8c36a",
+  "#b4c0ff",
+  "#ff8b7a",
+  "#7ee0c4",
+  "#b78bf2",
+  "#ffb454",
+  "#5ee0e8",
+  "#9ee07c",
+  "#ff6f61",
+  "#c5a3ff",
+];
+
+function catColor(index) {
+  return PALETTE[index % PALETTE.length];
+}
 
 // Минимальное значение фильтра по категории (0 = «любое»).
 function zeroFilters() {
   return emptyRatings(0);
+}
+
+// Числа без «хвоста»: 84 -> "84", 84.3 -> "84.3".
+function formatNumber(value) {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
 }
 
 const state = {
@@ -99,7 +140,7 @@ const els = {
   boardSearch: document.getElementById("board-search"),
   boardMinScore: document.getElementById("board-min-score"),
   boardMaxScore: document.getElementById("board-max-score"),
-  // Селекты «минимум по категории» строятся динамически из CATEGORIES.
+  // Селекты «минимум по категории» строятся динамически из активного пресета.
   categoryFilters: document.getElementById("category-filters"),
   lbHead: document.getElementById("lb-head"),
   rateKickerCats: document.getElementById("rate-kicker-cats"),
@@ -120,6 +161,30 @@ const els = {
   detailName: document.getElementById("detail-name"),
   detailScore: document.getElementById("detail-score"),
   detailCategories: document.getElementById("detail-categories"),
+  // Settings (пресеты + шкала)
+  settingsPreset: document.getElementById("settings-preset"),
+  settingsPresetCats: document.getElementById("preset-cats"),
+  settingsScale: document.getElementById("settings-scale"),
+  btnPresetNew: document.getElementById("btn-preset-new"),
+  btnPresetEdit: document.getElementById("btn-preset-edit"),
+  btnPresetDownload: document.getElementById("btn-preset-download"),
+  btnPresetDelete: document.getElementById("btn-preset-delete"),
+  btnPresetUpload: document.getElementById("btn-preset-upload"),
+  btnSettingsReset: document.getElementById("btn-settings-reset"),
+  inputPreset: document.getElementById("input-preset"),
+  presetDialog: document.getElementById("preset-dialog"),
+  presetDialogTitle: document.getElementById("preset-dialog-title"),
+  presetForm: document.getElementById("preset-form"),
+  presetName: document.getElementById("preset-name"),
+  presetCatEditor: document.getElementById("preset-cat-editor"),
+  btnCatAdd: document.getElementById("btn-cat-add"),
+  btnPresetCancel: document.getElementById("btn-preset-cancel"),
+  btnPresetSave: document.getElementById("btn-preset-save"),
+  confirmDialog: document.getElementById("confirm-dialog"),
+  confirmTitle: document.getElementById("confirm-title"),
+  confirmText: document.getElementById("confirm-text"),
+  confirmOk: document.getElementById("confirm-ok"),
+  confirmCancel: document.getElementById("confirm-cancel"),
 };
 
 let rateHandle = null;
@@ -145,14 +210,17 @@ function currentPhoto() {
 }
 
 function average(ratings) {
-  const values = CATEGORIES.map((c) => ratings[c.key]);
+  const keys = activeCategoryKeys();
+  if (!keys.length) return null;
+  const values = keys.map((key) => ratings[key]);
   if (values.some((v) => v == null)) return null;
   return Math.round((values.reduce((a, b) => a + b, 0) / values.length) * 10) / 10;
 }
 
 function formatScore(score) {
-  if (score == null) return "—/10";
-  return `${score.toFixed(1)}/10`;
+  const max = getScale();
+  if (score == null) return `—/${max}`;
+  return `${formatNumber(score)}/${max}`;
 }
 
 function showToast(text) {
@@ -286,47 +354,82 @@ async function ingestEntries(entries) {
 }
 
 function buildCategories() {
+  const scale = getScale();
+  const cats = activeCategories();
+  const isNumeric = scale === 100;
   els.categories.replaceChildren(
-    ...CATEGORIES.map((cat) => {
+    ...cats.map((cat, index) => {
       const card = document.createElement("div");
       card.className = "cat";
       card.dataset.key = cat.key;
+      card.style.setProperty("--cat-color", catColor(index));
+
       card.innerHTML = `
         <div class="cat-top">
           <div class="cat-name"><i class="swatch"></i>${cat.label}</div>
           <div class="cat-val" data-val>—</div>
         </div>
-        <div class="stars" role="radiogroup" aria-label="${cat.label}"></div>
+        ${
+          isNumeric
+            ? `
+          <div class="stepper" role="group" aria-label="${cat.label}">
+            <button type="button" class="step-btn" data-act="minus" aria-label="${cat.label}: уменьшить на 10">−10</button>
+            <input class="stepper-input" type="number" inputmode="numeric" min="0" max="100" step="1" aria-label="${cat.label}: баллы от 0 до 100" />
+            <button type="button" class="step-btn" data-act="plus" aria-label="${cat.label}: увеличить на 10">+10</button>
+          </div>
+          <p class="stepper-hint">0 — без оценки · шаг ±10</p>`
+            : `
+          <div class="stars" role="radiogroup" aria-label="${cat.label}"></div>`
+        }
       `;
-      const row = card.querySelector(".stars");
-      for (let i = 1; i <= 10; i += 1) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = "star";
-        btn.dataset.v = String(i);
-        btn.setAttribute("aria-label", `${cat.label}: ${i}`);
-        row.append(btn);
-      }
 
-      row.addEventListener("pointermove", (event) => {
-        const btn = event.target.closest(".star");
-        if (!btn) return;
-        paintStars(row, Number(btn.dataset.v), true);
-      });
-      row.addEventListener("pointerleave", () => {
-        const photo = currentPhoto();
-        paintStars(row, photo?.ratings[cat.key], false);
-      });
-      row.addEventListener("click", (event) => {
-        const btn = event.target.closest(".star");
-        if (!btn) return;
-        const photo = currentPhoto();
-        if (!photo) return;
-        photo.ratings[cat.key] = Number(btn.dataset.v);
-        photo.skipped = false;
-        invalidateTiebreak();
-        refreshRatePanel();
-      });
+      if (isNumeric) {
+        const input = card.querySelector(".stepper-input");
+        const minus = card.querySelector('[data-act="minus"]');
+        const plus = card.querySelector('[data-act="plus"]');
+
+        // Ручной ввод: значение применяется сразу, как только в поле целое число.
+        input.addEventListener("input", () => {
+          const parsed = Number.parseInt(input.value, 10);
+          if (!Number.isFinite(parsed)) return;
+          setRating(cat.key, parsed);
+        });
+        minus.addEventListener("click", () => {
+          const current = currentPhoto()?.ratings[cat.key];
+          setRating(cat.key, (current || 0) - 10);
+        });
+        plus.addEventListener("click", () => {
+          const current = currentPhoto()?.ratings[cat.key];
+          setRating(cat.key, (current || 0) + 10);
+        });
+      } else {
+        const row = card.querySelector(".stars");
+        // Количество кружков зависит от шкалы: 5 или 10.
+        row.style.gridTemplateColumns = `repeat(${scale}, 1fr)`;
+        for (let i = 1; i <= scale; i += 1) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "star";
+          btn.dataset.v = String(i);
+          btn.setAttribute("aria-label", `${cat.label}: ${i}`);
+          row.append(btn);
+        }
+
+        row.addEventListener("pointermove", (event) => {
+          const btn = event.target.closest(".star");
+          if (!btn) return;
+          paintStars(row, Number(btn.dataset.v), true);
+        });
+        row.addEventListener("pointerleave", () => {
+          const photo = currentPhoto();
+          paintStars(row, photo?.ratings[cat.key], false);
+        });
+        row.addEventListener("click", (event) => {
+          const btn = event.target.closest(".star");
+          if (!btn) return;
+          setRating(cat.key, Number(btn.dataset.v));
+        });
+      }
       return card;
     }),
   );
@@ -340,17 +443,44 @@ function paintStars(row, value, preview) {
   });
 }
 
+// Показывает состояние числовой (100-балльной) категории.
+function paintNumeric(card, value) {
+  const input = card.querySelector(".stepper-input");
+  const minus = card.querySelector('[data-act="minus"]');
+  const plus = card.querySelector('[data-act="plus"]');
+  if (!input) return;
+  input.value = value == null ? "" : String(value);
+  if (minus) minus.disabled = (value || 0) <= 0;
+  if (plus) plus.disabled = (value || 0) >= 100;
+}
+
+// Выставляет балл за категорию и обновляет панель. 0 на 100-балльной шкале
+// трактуется как «ещё не оценено», как и пустое значение.
+function setRating(key, rawValue) {
+  const photo = currentPhoto();
+  if (!photo) return;
+  const scale = getScale();
+  let value = typeof rawValue === "number" ? rawValue : Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(value)) value = 0;
+  value = Math.max(0, Math.min(scale, Math.round(value)));
+  photo.ratings[key] = value === 0 ? null : value;
+  photo.skipped = false;
+  invalidateTiebreak();
+  refreshRatePanel();
+}
+
 // --- Контролы, которые строятся из набора категорий ---
 
 function buildRateKicker() {
-  const count = CATEGORIES.length;
-  els.rateKickerCats.textContent = `${count} ${pluralCategories(count)}`;
+  const count = activeCategories().length;
+  const scale = getScale();
+  els.rateKickerCats.textContent = `${count} ${pluralCategories(count)} · шкала ${scale}`;
 }
 
 // Сортировка таблицы лидеров: «Общая оценка» + по одной опции на категорию.
 function buildSortOptions() {
   els.boardSort.replaceChildren(
-    ...[{ key: "total", label: "Общая оценка" }, ...CATEGORIES].map((item) => {
+    ...[{ key: "total", label: "Общая оценка" }, ...activeCategories()].map((item) => {
       const option = document.createElement("option");
       option.value = item.key;
       option.textContent = item.label;
@@ -363,11 +493,12 @@ function buildSortOptions() {
   els.boardSort.value = state.sortKey;
 }
 
-// Фильтр «минимум по категории»: по селекту на категорию, ключи — из CATEGORIES.
+// Фильтр «минимум по категории»: по селекту на категорию.
 function buildCategoryFilters() {
+  const scale = getScale();
   categoryFilterSelects.clear();
   const fragment = document.createDocumentFragment();
-  for (const cat of CATEGORIES) {
+  for (const cat of activeCategories()) {
     const id = `filter-${categorySlug(cat.key)}`;
     const wrapper = document.createElement("label");
     wrapper.setAttribute("for", id);
@@ -377,7 +508,7 @@ function buildCategoryFilters() {
 
     const select = document.createElement("select");
     select.id = id;
-    for (let value = 0; value <= 10; value += 1) {
+    for (let value = 0; value <= scale; value += 1) {
       const option = document.createElement("option");
       option.value = String(value);
       option.textContent = value === 0 ? "Любое" : String(value);
@@ -394,7 +525,7 @@ function buildCategoryFilters() {
 
 // Шапка таблицы лидеров: Место / Фото / Итог / категории… / действия.
 function buildTableHead() {
-  const labels = ["Место", "Фото", "Итог", ...CATEGORIES.map((cat) => cat.label), ""];
+  const labels = ["Место", "Фото", "Итог", ...activeCategories().map((cat) => cat.label), ""];
   els.lbHead.replaceChildren(
     ...labels.map((text) => {
       const th = document.createElement("th");
@@ -404,13 +535,24 @@ function buildTableHead() {
   );
 }
 
+// Ограничения полей фильтра «итоговый балл» зависят от активной шкалы.
+function syncScoreFilterAttrs() {
+  const scale = getScale();
+  for (const input of [els.boardMinScore, els.boardMaxScore]) {
+    input.min = 1;
+    input.max = scale;
+    input.step = scale === 100 ? "1" : "0.1";
+  }
+  els.boardMaxScore.placeholder = String(scale);
+}
+
 function refreshRatePanel() {
   const photo = currentPhoto();
   if (!photo) return;
   const score = average(photo.ratings);
   const totalScore = document.getElementById("total-score");
   if (photo.skipped) {
-    els.totalValue.textContent = "Skipped";
+    els.totalValue.textContent = "Пропущено";
     totalScore.classList.add("is-skipped");
   } else {
     els.totalValue.textContent = formatScore(score);
@@ -420,10 +562,11 @@ function refreshRatePanel() {
     const key = card.dataset.key;
     const value = photo.ratings[key];
     card.querySelector("[data-val]").textContent = value == null ? "—" : value;
-    paintStars(card.querySelector(".stars"), value, false);
+    if (card.querySelector(".stepper")) paintNumeric(card, value);
+    else paintStars(card.querySelector(".stars"), value, false);
   });
 
-  const complete = CATEGORIES.every((c) => photo.ratings[c.key] != null);
+  const complete = activeCategoryKeys().every((key) => photo.ratings[key] != null);
   const canProceed = complete || photo.skipped;
   els.btnNext.disabled = !canProceed;
   els.btnNext.textContent = state.index === state.order.length - 1 ? "К таблице лидеров" : "Следующий";
@@ -467,7 +610,7 @@ function goPrev() {
 async function goNext() {
   const photo = currentPhoto();
   if (!photo) return;
-  const complete = CATEGORIES.every((c) => photo.ratings[c.key] != null);
+  const complete = activeCategoryKeys().every((key) => photo.ratings[key] != null);
   if (!complete && !photo.skipped) return;
   if (state.index < state.order.length - 1) {
     state.index += 1;
@@ -481,8 +624,8 @@ async function skipCurrent() {
   const photo = currentPhoto();
   if (!photo) return;
   photo.skipped = true;
-  for (const cat of CATEGORIES) {
-    photo.ratings[cat.key] = null;
+  for (const key of activeCategoryKeys()) {
+    photo.ratings[key] = null;
   }
   photo.thumb = null;
   invalidateTiebreak();
@@ -533,7 +676,7 @@ function matchesFilters(row) {
   if (total == null) return false;
   if (f.minScore != null && total < f.minScore) return false;
   if (f.maxScore != null && total > f.maxScore) return false;
-  for (const key of CATEGORY_KEYS) {
+  for (const key of activeCategoryKeys()) {
     if (f.min[key] > 0 && (row.photo.ratings[key] ?? 0) < f.min[key]) return false;
   }
   return true;
@@ -749,6 +892,7 @@ async function finishRating() {
 
 async function openLeaderboard() {
   setScreen("board");
+  syncScoreFilterAttrs();
   // У импортированной сессии нет экрана оценки — прячем «вернуться к оценкам».
   els.btnBackRate.hidden = !!state.imported;
   const ratedCount = state.photos.filter((photo) => !photo.skipped).length;
@@ -770,7 +914,7 @@ function renderTable(ranked, allRanked = ranked) {
     const empty = document.createElement("tr");
     // Место + Фото + Итог + категории + действия.
     const message = ratedCount ? "Ничего не найдено по фильтрам" : "Нет оценённых фото";
-    empty.innerHTML = `<td colspan="${CATEGORIES.length + 4}" class="table-empty">${message}</td>`;
+    empty.innerHTML = `<td colspan="${activeCategories().length + 4}" class="table-empty">${message}</td>`;
     els.lbBody.replaceChildren(empty);
     return;
   }
@@ -781,10 +925,15 @@ function renderTable(ranked, allRanked = ranked) {
       const place = places.get(row.photo.id) ?? i + 1;
       const tr = document.createElement("tr");
       const badgeClass = place === 1 ? "gold" : place === 2 ? "silver" : place === 3 ? "bronze" : "";
-      // Столбцы категорий — по одному на каждую категорию, в порядке CATEGORIES.
-      const categoryCells = CATEGORY_KEYS.map(
-        (key) => `<td class="cat-cell" data-key="${key}">${row.photo.ratings[key] ?? "—"}</td>`,
-      ).join("");
+      // Столбцы категорий — по одному на каждую категорию активного пресета.
+      const categoryCells = activeCategoryKeys()
+        .map(
+          (key, index) =>
+            `<td class="cat-cell" data-key="${key}" style="--cat-color:${catColor(index)}">${
+              row.photo.ratings[key] ?? "—"
+            }</td>`,
+        )
+        .join("");
       tr.innerHTML = `
         <td><span class="place-badge ${badgeClass}">${place}</span></td>
         <td>
@@ -902,11 +1051,13 @@ function onReveal(photo) {
 
 function renderDetailCategories(photo) {
   els.detailCategories.replaceChildren(
-    ...CATEGORIES.map((cat) => {
+    ...activeCategories().map((cat, index) => {
       const row = document.createElement("div");
       row.className = "detail-category";
-      // data-key даёт строке цвет категории (--cat-color из css/app.css).
       row.dataset.key = cat.key;
+      // data-key даёт цвет категории; для пользовательских пресетов цвет
+      // назначается по индексу из палитры.
+      row.style.setProperty("--cat-color", catColor(index));
       row.innerHTML = `<span><i class="swatch"></i>${cat.label}</span><strong></strong>`;
       row.querySelector("strong").textContent = photo.ratings[cat.key] ?? "—";
       return row;
@@ -1019,18 +1170,37 @@ function newSession() {
 
 // --- Экспорт / импорт оценок ---
 
-// Версия формата: 4 — оценка фото, набор категорий (причёска, цвет глаз,
-// верхняя одежда, нижняя одежда, обувь, аксессуары), без 3D-модели. В файле
-// дублируется список ключей категорий, чтобы импорт мог честно сказать о
-// несовпадении с текущим набором. Более старые файлы (v1–v2 — оценка скинов,
-// v3 — фото по категориям композиция/свет/цвет/резкость/детализация/эмоция/
-// атмосфера) при импорте читаются, но по новым категориям в них оценок не
-// будет — превью импорта предупредит об этом.
-const EXPORT_VERSION = 4;
+// Версия формата: 5 — оценка фото по активному пресету категорий и активной
+// шкале (5/10/100). В файле дублируется набор категорий и шкала, чтобы импорт
+// мог восстановить тот же пресет и те же баллы.
+// Более старые файлы (v1–v2 — оценка скинов, v3 — фото по категориям
+// композиция/свет/цвет/резкость/детализация/эмоция/атмосфера, v4 — фото по
+// категориям «Человека» со шкалой 10) читаются, но пресет/шкала из них не
+// восстанавливаются — превью импорта предупредит о несовпадении категорий.
+const EXPORT_VERSION = 5;
 
 function freshId() {
   if (crypto.randomUUID) return crypto.randomUUID();
   return `photo-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+// Нормализует блок preset из файла оценок (или файла пресета).
+function normalizePreset(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const cats = (Array.isArray(raw.categories) ? raw.categories : [])
+    .filter((c) => c && typeof c === "object" && String(c.label || "").trim())
+    .map((c) => ({ key: String(c.key || ""), label: String(c.label).trim() }));
+  if (!cats.length) return null;
+  const used = new Set();
+  for (const cat of cats) {
+    if (!cat.key || used.has(cat.key)) cat.key = makeCategoryKey(cat.label, used);
+    used.add(cat.key);
+  }
+  return {
+    id: String(raw.id || ""),
+    label: String(raw.label || "Импортированный пресет").trim() || "Импортированный пресет",
+    categories: cats,
+  };
 }
 
 function exportRatings() {
@@ -1039,17 +1209,24 @@ function exportRatings() {
     showToast("Нет оценённых фото для сохранения");
     return;
   }
+  const preset = activePreset();
   const data = {
     version: EXPORT_VERSION,
     app: "photovote",
     date: new Date().toISOString(),
-    categories: CATEGORY_KEYS.slice(),
+    scale: getScale(),
+    preset: {
+      id: preset.id,
+      label: preset.label,
+      categories: preset.categories.map((c) => ({ key: c.key, label: c.label })),
+    },
+    categories: activeCategoryKeys(),
     photos: state.photos.map((p) => {
       // Пропущенные фото сохраняются без оценок, остальные — по всем категориям.
-      const ratings = CATEGORY_KEYS.reduce((acc, key) => {
-        acc[key] = p.skipped ? null : (p.ratings[key] ?? null);
-        return acc;
-      }, {});
+      const ratings = {};
+      for (const key of activeCategoryKeys()) {
+        ratings[key] = p.skipped ? null : (p.ratings[key] ?? null);
+      }
       return {
         name: p.name,
         relativePath: p.relativePath,
@@ -1086,6 +1263,9 @@ function parseSession(text) {
   // Ключи категорий, которые реально встречаются в файле: нужны, чтобы
   // предупредить о файле, сохранённом для другого набора категорий.
   const fileKeys = new Set();
+  const fileScale = SCALES.some((s) => s.value === data.scale) ? data.scale : null;
+  // Для старых файлов без поля scale считаем, что они записаны по шкале 10.
+  const valueMax = fileScale || 10;
   const photos = rawList.map((raw, i) => {
     if (!raw || typeof raw !== "object") {
       throw new Error(`Фото #${i + 1}: неверная запись`);
@@ -1095,10 +1275,11 @@ function parseSession(text) {
     const skipped = !!raw.skipped;
     const inRatings = raw.ratings && typeof raw.ratings === "object" ? raw.ratings : {};
     Object.keys(inRatings).forEach((key) => fileKeys.add(key));
+    // Сохраняем все встреченные в файле оценки: если пресет из файла будет
+    // применён, ни одна оценка не потеряется.
     const ratings = {};
-    for (const k of CATEGORY_KEYS) {
-      const v = inRatings[k];
-      ratings[k] = Number.isFinite(v) && v >= 0 && v <= 10 ? Number(v) : null;
+    for (const [key, v] of Object.entries(inRatings)) {
+      ratings[key] = Number.isFinite(v) ? Math.min(valueMax, Math.max(0, Math.round(Number(v)))) : null;
     }
     return {
       id: freshId(),
@@ -1122,14 +1303,20 @@ function parseSession(text) {
     date: typeof data.date === "string" ? data.date : null,
     // v3+ пишет список категорий явно; у более старых файлов берём его из оценок.
     categories: Array.isArray(data.categories) ? data.categories.map((key) => String(key)) : [...fileKeys],
+    scale: fileScale,
+    preset: normalizePreset(data.preset),
     photos,
   };
 }
 
 // Категории, которых нет в загружаемом файле, — по ним оценки останутся пустыми.
+// Если файл несёт свой пресет, предупреждение строится относительно него.
 function missingCategories(session) {
   const known = new Set(Array.isArray(session.categories) ? session.categories : []);
-  return CATEGORIES.filter((cat) => !known.has(cat.key)).map((cat) => cat.label);
+  const expected = session.preset && session.preset.categories.length
+    ? session.preset.categories
+    : activeCategories();
+  return expected.filter((cat) => !known.has(cat.key)).map((cat) => cat.label);
 }
 
 function formatSessionDate(iso) {
@@ -1220,11 +1407,18 @@ function showImportPreview(session) {
         .map((label) => escapeAttr(label))
         .join(", ")}» — они будут пустыми.</p>`
     : "";
+  const settingsParts = [];
+  if (session.preset) settingsParts.push(`пресет «${escapeAttr(session.preset.label)}»`);
+  if (session.scale) settingsParts.push(`шкала ${session.scale}`);
+  const settingsHint = settingsParts.length
+    ? `<p class="muted" style="margin-top:8px">Из файла будут применены: <b>${settingsParts.join(", ")}</b>. Пресет будет доступен в настройках.</p>`
+    : "";
   els.importPreview.innerHTML = `
     <p class="muted">Сессия от <b>${formatSessionDate(session.date)}</b></p>
     <p>Фото в файле: <b>${total}</b>${rated !== total ? ` (оценено ${rated}, пропущено ${skipped})` : ""}</p>
     ${sample ? `<p class="muted" style="margin-top:8px">Например: ${sample}${total > 4 ? "…" : ""}</p>` : ""}
     <p class="muted" style="margin-top:8px">${previewHint}</p>
+    ${settingsHint}
     ${missingHint}
     <p class="muted" style="margin-top:8px">Сразу откроется таблица лидеров.</p>
   `;
@@ -1234,6 +1428,11 @@ function showImportPreview(session) {
 
 function loadImportedSession(session) {
   if (typeof els.importDialog.close === "function") els.importDialog.close();
+
+  // Восстанавливаем пресет и шкалу, с которыми сохранялись оценки, чтобы
+  // баллы отображались в тех же категориях.
+  const willRebuild = applyImportedSettings(session);
+
   const merged = mergeImportedFiles(session);
   state.photos = merged.photos;
   state.rejected = [];
@@ -1245,11 +1444,42 @@ function loadImportedSession(session) {
   state.imported = true;
   resetBoardFilters();
   setFiltersVisible(false);
+  if (willRebuild) rebuildSettingsDependentUI(false);
   if (merged.matchedCount) {
     showToast(`Подключены локальные файлы: ${merged.matchedCount} из ${session.photos.length}`);
   }
   // Импортированные данные показываем сразу, без экрана оценки и тейбрейкера.
   openLeaderboard();
+}
+
+// Применяет пресет/шкалу из файла оценок. Возвращает true, если что-то поменялось.
+function applyImportedSettings(session) {
+  let changed = false;
+  if (session.scale && session.scale !== getScale()) {
+    setScale(session.scale);
+    changed = true;
+  }
+  if (session.preset) {
+    const builtin = BUILTIN_PRESETS.find((p) => p.id === session.preset.id);
+    if (builtin) {
+      if (activePreset().id !== builtin.id) {
+        setActivePresetId(builtin.id);
+        changed = true;
+      }
+    } else {
+      const preset = { ...session.preset };
+      const builtinIds = new Set(BUILTIN_PRESETS.map((p) => p.id));
+      if (!preset.id || builtinIds.has(preset.id)) {
+        preset.id = `custom-${Date.now().toString(36)}`;
+      }
+      const stored = saveCustomPreset(preset);
+      if (activePreset().id !== stored.id) {
+        setActivePresetId(stored.id);
+        changed = true;
+      }
+    }
+  }
+  return changed;
 }
 
 async function handleImportFile(file) {
@@ -1365,22 +1595,480 @@ function readScoreFilter(input) {
   if (!raw) return null;
   const value = Number(raw);
   if (!Number.isFinite(value)) return null;
-  return Math.min(10, Math.max(1, value));
+  return Math.min(getScale(), Math.max(1, value));
 }
 
 function updateCategoryFilter(key, value) {
   const number = Number(value);
-  state.filters.min[key] = Number.isFinite(number) ? Math.min(10, Math.max(0, number)) : 0;
+  const max = getScale();
+  state.filters.min[key] = Number.isFinite(number) ? Math.min(max, Math.max(0, number)) : 0;
   renderTableOnly();
 }
 
-function bindRate() {
-  // Всё, что зависит от набора категорий, строится из CATEGORIES один раз.
+// --- Настройки: пресеты категорий и шкала оценки ---
+
+let presetEditId = null; // id редактируемого пользовательского пресета
+let presetEditOrig = []; // исходные категории при редактировании (для сохранения ключей)
+let confirmResolver = null;
+
+function hasRatedPhotos() {
+  return state.photos.some(
+    (photo) => photo.skipped || Object.values(photo.ratings || {}).some((value) => value != null),
+  );
+}
+
+// Очищает все оценки сессии (при смене пресета/шкалы баллы несовместимы).
+function clearSessionRatings() {
+  for (const photo of state.photos) {
+    photo.ratings = emptyRatings();
+    photo.skipped = false;
+    photo.thumb = null;
+  }
+  state.tiebreak = null;
+}
+
+function openConfirmDialog(title, text, okLabel) {
+  els.confirmTitle.textContent = title;
+  els.confirmText.textContent = text;
+  els.confirmOk.textContent = okLabel;
+  if (typeof els.confirmDialog.showModal === "function") els.confirmDialog.showModal();
+  else resolveConfirm(true); // диалогов нет — действуем сразу
+}
+
+function resolveConfirm(value) {
+  // Сбрасываем резолвер до close(): закрытие диалога синхронно порождает
+  // событие close, чей обработчик завершает ожидающий askConfirm значением
+  // false — иначе подтверждение по кнопке «ОК» терялось бы.
+  const resolve = confirmResolver;
+  confirmResolver = null;
+  if (typeof els.confirmDialog.close === "function" && els.confirmDialog.open) els.confirmDialog.close();
+  if (resolve) resolve(value);
+}
+
+function askConfirm(title, text, okLabel) {
+  return new Promise((resolve) => {
+    confirmResolver = resolve;
+    openConfirmDialog(title, text, okLabel);
+  });
+}
+
+// Перестраивает всё, что зависит от пресета/шкалы, и приводит панель настроек
+// в соответствие с активным состоянием. Оценки не трогает.
+function rebuildSettingsDependentUI() {
+  buildSettingsPresetOptions();
   buildRateKicker();
   buildCategories();
   buildSortOptions();
   buildCategoryFilters();
   buildTableHead();
+  syncScoreFilterAttrs();
+  resetBoardFilters();
+  refreshSettingsPanel();
+}
+
+// Применяет уже изменённые настройки: чистит оценки, перестраивает экраны.
+function finalizeSettingsChange() {
+  clearSessionRatings();
+  rebuildSettingsDependentUI();
+  showToast("Настройки применены");
+  if (state.screen === "rate") refreshRatePanel();
+  else if (state.screen === "board") void renderLeaderboard();
+}
+
+function requestPresetChange(presetId) {
+  const preset = listPresets().find((p) => p.id === presetId);
+  if (!preset || presetId === activePreset().id) {
+    refreshSettingsPanel();
+    return;
+  }
+  const apply = () => {
+    setActivePresetId(presetId);
+    finalizeSettingsChange();
+  };
+  if (!hasRatedPhotos()) {
+    apply();
+    return;
+  }
+  void askConfirm(
+    "Сменить пресет?",
+    `Будет применён пресет «${preset.label}». Выставленные оценки текущей сессии будут очищены.`,
+    "Очистить и применить",
+  ).then((ok) => {
+    if (ok) apply();
+    else refreshSettingsPanel();
+  });
+}
+
+function requestScaleChange(scale) {
+  const option = SCALES.find((s) => s.value === scale);
+  if (!option || scale === getScale()) {
+    refreshSettingsPanel();
+    return;
+  }
+  const apply = () => {
+    setScale(scale);
+    finalizeSettingsChange();
+  };
+  if (!hasRatedPhotos()) {
+    apply();
+    return;
+  }
+  void askConfirm(
+    "Сменить шкалу?",
+    `Оценки будут выставляться по ${option.label.toLowerCase()} шкале. Выставленные оценки текущей сессии будут очищены.`,
+    "Очистить и применить",
+  ).then((ok) => {
+    if (ok) apply();
+    else refreshSettingsPanel();
+  });
+}
+
+function requestResetSettings() {
+  const apply = () => {
+    resetSettings();
+    finalizeSettingsChange();
+  };
+  if (!hasRatedPhotos()) {
+    apply();
+    return;
+  }
+  void askConfirm(
+    "Сбросить настройки?",
+    "Будут восстановлены пресет «Человек» и 10-балльная шкала. Оценки текущей сессии будут очищены.",
+    "Сбросить и применить",
+  ).then((ok) => {
+    if (ok) apply();
+    else refreshSettingsPanel();
+  });
+}
+
+function buildSettingsPresetOptions() {
+  const presets = listPresets();
+  const fragment = document.createDocumentFragment();
+  const groups = [
+    { label: "Встроенные", items: presets.filter((p) => p.builtin) },
+    { label: "Мои пресеты", items: presets.filter((p) => !p.builtin) },
+  ];
+  for (const group of groups) {
+    if (!group.items.length) continue;
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = group.label;
+    for (const preset of group.items) {
+      const option = document.createElement("option");
+      option.value = preset.id;
+      option.textContent = preset.label;
+      optgroup.append(option);
+    }
+    fragment.append(optgroup);
+  }
+  els.settingsPreset.replaceChildren(fragment);
+}
+
+function buildSettingsScaleChoices() {
+  els.settingsScale.replaceChildren(
+    ...SCALES.map((scale) => {
+      const label = document.createElement("label");
+      label.className = "scale-choice";
+
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "settings-scale";
+      radio.value = String(scale.value);
+
+      const dot = document.createElement("span");
+      dot.className = "scale-radio";
+
+      const txt = document.createElement("span");
+      txt.className = "scale-txt";
+      const b = document.createElement("b");
+      b.textContent = `${scale.value}-балльная`;
+      const i = document.createElement("i");
+      i.textContent = scale.caption;
+      txt.append(b, i);
+
+      label.append(radio, dot, txt);
+      return label;
+    }),
+  );
+}
+
+function renderPresetCats() {
+  const preset = activePreset();
+  els.settingsPresetCats.replaceChildren(
+    ...preset.categories.map((cat, index) => {
+      const chip = document.createElement("div");
+      chip.className = "preset-cat-chip";
+      const swatch = document.createElement("i");
+      swatch.className = "swatch";
+      swatch.style.background = catColor(index);
+      const text = document.createElement("span");
+      text.textContent = cat.label;
+      chip.append(swatch, text);
+      return chip;
+    }),
+  );
+}
+
+function refreshSettingsPanel() {
+  const preset = activePreset();
+  els.settingsPreset.value = preset.id;
+  for (const radio of els.settingsScale.querySelectorAll('input[name="settings-scale"]')) {
+    radio.checked = Number(radio.value) === getScale();
+  }
+  renderPresetCats();
+  const custom = !preset.builtin;
+  els.btnPresetEdit.hidden = !custom;
+  els.btnPresetDownload.hidden = !custom;
+  els.btnPresetDelete.hidden = !custom;
+}
+
+// --- Редактор пользовательских пресетов ---
+
+function presetRowElement(cat) {
+  const row = document.createElement("div");
+  row.className = "preset-cat-row";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 40;
+  input.placeholder = "Название категории";
+  input.autocomplete = "off";
+  input.value = cat ? cat.label : "";
+  if (cat) row.dataset.key = cat.key;
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "icon-btn";
+  remove.setAttribute("aria-label", "Убрать категорию");
+  remove.title = "Убрать";
+  remove.textContent = "×";
+  remove.addEventListener("click", () => {
+    row.remove();
+    if (!els.presetCatEditor.children.length) addPresetRow();
+  });
+
+  row.append(input, remove);
+  return row;
+}
+
+function addPresetRow() {
+  els.presetCatEditor.append(presetRowElement(null));
+}
+
+function openPresetEditor(preset) {
+  presetEditId = preset && !preset.builtin ? preset.id : null;
+  presetEditOrig = preset ? preset.categories : [];
+  els.presetDialogTitle.textContent = presetEditId ? "Изменить пресет" : "Новый пресет";
+  els.btnPresetSave.textContent = presetEditId ? "Сохранить пресет" : "Создать пресет";
+  els.presetName.value = preset ? preset.label : "";
+  els.presetCatEditor.replaceChildren();
+  const start = presetEditOrig.length ? presetEditOrig : [null];
+  for (const cat of start) els.presetCatEditor.append(presetRowElement(cat));
+  if (typeof els.presetDialog.showModal === "function") {
+    els.presetDialog.showModal();
+    els.presetName.focus();
+  }
+}
+
+function collectPresetEditorRows() {
+  const rows = [...els.presetCatEditor.querySelectorAll(".preset-cat-row")];
+  const usedKeys = new Set();
+  const categories = [];
+  for (const row of rows) {
+    const label = row.querySelector("input").value.trim();
+    if (!label) continue;
+    let key = row.dataset.key || "";
+    if (!key || usedKeys.has(key)) key = makeCategoryKey(label, usedKeys);
+    usedKeys.add(key);
+    categories.push({ key, label });
+  }
+  return categories;
+}
+
+// true, если два набора категорий совпадают по ключам и порядку
+// (переименование категории ключ сохраняет — оценки остаются валидными).
+function sameCategoryShape(before, after) {
+  if (!Array.isArray(before) || !Array.isArray(after) || before.length !== after.length) return false;
+  return before.every((cat, index) => {
+    const key = cat && cat.key ? String(cat.key) : "";
+    const other = after[index];
+    return Boolean(key) && other && String(other.key || "") === key;
+  });
+}
+
+function submitPresetForm() {
+  const label = els.presetName.value.trim();
+  if (!label) {
+    els.presetName.focus();
+    showToast("Укажите название пресета");
+    return;
+  }
+  const categories = collectPresetEditorRows();
+  if (!categories.length) {
+    showToast("Добавьте хотя бы одну категорию");
+    return;
+  }
+  // Правка пресета, который сейчас активен: при изменении набора категорий
+  // оценки сессии становятся несовместимыми — ведём себя как при смене пресета.
+  const editingActive = Boolean(presetEditId) && activePreset().id === presetEditId;
+  const shapeChanged = editingActive && !sameCategoryShape(presetEditOrig, categories);
+  const preset = saveCustomPreset({
+    id: presetEditId || `custom-${Date.now().toString(36)}`,
+    label,
+    categories,
+  });
+  if (typeof els.presetDialog.close === "function") els.presetDialog.close();
+  presetEditId = null;
+  presetEditOrig = [];
+
+  if (editingActive && shapeChanged) {
+    const apply = () => {
+      finalizeSettingsChange();
+      showToast("Пресет обновлён");
+    };
+    if (!hasRatedPhotos()) {
+      apply();
+      return;
+    }
+    void askConfirm(
+      "Сменить пресет?",
+      `Пресет «${preset.label}» изменён. Выставленные оценки текущей сессии будут очищены.`,
+      "Очистить и применить",
+    ).then((ok) => {
+      if (ok) apply();
+      else refreshSettingsPanel();
+    });
+    return;
+  }
+
+  if (editingActive) {
+    // Набор категорий прежний (например, переименование) — оценки сохраняются,
+    // обновляем все экраны под новые названия.
+    rebuildSettingsDependentUI();
+    showToast("Пресет обновлён");
+    if (state.screen === "rate") refreshRatePanel();
+    else if (state.screen === "board") void renderLeaderboard();
+    return;
+  }
+
+  requestPresetChange(preset.id);
+}
+
+function downloadPreset(preset) {
+  const blob = new Blob([serializePreset(preset)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const slug = categorySlug(preset.label).replace(/-+$/g, "") || "preset";
+  a.href = url;
+  a.download = `photovote-preset-${slug}.json`;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+  showToast("Пресет сохранён в JSON");
+}
+
+async function handlePresetFile(file) {
+  if (!file) return;
+  let text;
+  try {
+    text = await file.text();
+  } catch {
+    showToast("Не удалось прочитать файл пресета");
+    return;
+  }
+  const preset = parsePresetFile(text);
+  if (!preset) {
+    showToast("Файл не похож на пресет категорий");
+    return;
+  }
+  const taken = new Set(listPresets().map((p) => p.id));
+  if (!preset.id || taken.has(preset.id)) {
+    // Не затираем существующий пресет с тем же id — создаём новую копию.
+    preset.id = `custom-${Date.now().toString(36)}`;
+  }
+  saveCustomPreset(preset);
+  buildSettingsPresetOptions();
+  showToast(`Пресет «${preset.label}» загружен`);
+  requestPresetChange(preset.id);
+}
+
+function bindSettings() {
+  buildSettingsPresetOptions();
+  buildSettingsScaleChoices();
+  refreshSettingsPanel();
+
+  els.settingsPreset.addEventListener("change", () => requestPresetChange(els.settingsPreset.value));
+  els.settingsScale.addEventListener("change", (event) => {
+    const value = Number(event.target.value);
+    if (event.target.type === "radio" && Number.isFinite(value)) requestScaleChange(value);
+  });
+  els.btnPresetNew.addEventListener("click", () => openPresetEditor(null));
+  els.btnPresetEdit.addEventListener("click", () => openPresetEditor(activePreset()));
+  els.btnPresetDownload.addEventListener("click", () => downloadPreset(activePreset()));
+  els.btnPresetDelete.addEventListener("click", () => {
+    const preset = activePreset();
+    if (!preset || preset.builtin) return;
+    void askConfirm(
+      "Удалить пресет?",
+      `Пресет «${preset.label}» будет удалён из этого браузера. Если он использовался, будет применён пресет «Человек».`,
+      "Удалить",
+    ).then((ok) => {
+      if (!ok) return;
+      deleteCustomPreset(preset.id);
+      const fallback = BUILTIN_PRESETS[0];
+      if (activePreset().id === preset.id) setActivePresetId(fallback.id);
+      rebuildSettingsDependentUI();
+      showToast("Пресет удалён");
+    });
+  });
+  els.btnPresetUpload.addEventListener("click", () => els.inputPreset.click());
+  els.inputPreset.addEventListener("change", async () => {
+    const file = els.inputPreset.files?.[0];
+    els.inputPreset.value = "";
+    if (file) await handlePresetFile(file);
+  });
+  els.btnSettingsReset.addEventListener("click", requestResetSettings);
+
+  // Диалог подтверждения
+  els.confirmOk.addEventListener("click", () => resolveConfirm(true));
+  els.confirmCancel.addEventListener("click", () => resolveConfirm(false));
+  els.confirmDialog.addEventListener("close", () => {
+    if (confirmResolver) resolveConfirm(false);
+  });
+  els.confirmDialog.addEventListener("click", (event) => {
+    if (event.target === els.confirmDialog) resolveConfirm(false);
+  });
+
+  // Диалог редактора пресета
+  els.presetForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitPresetForm();
+  });
+  els.btnPresetCancel.addEventListener("click", () => {
+    if (typeof els.presetDialog.close === "function") els.presetDialog.close();
+    presetEditId = null;
+    presetEditOrig = [];
+  });
+  els.btnCatAdd.addEventListener("click", addPresetRow);
+  els.presetDialog.addEventListener("click", (event) => {
+    if (event.target === els.presetDialog && typeof els.presetDialog.close === "function") {
+      els.presetDialog.close();
+      presetEditId = null;
+      presetEditOrig = [];
+    }
+  });
+}
+
+function bindRate() {
+  // Всё, что зависит от набора категорий, строится из активного пресета.
+  buildRateKicker();
+  buildCategories();
+  buildSortOptions();
+  buildCategoryFilters();
+  buildTableHead();
+  syncScoreFilterAttrs();
+  bindSettings();
   els.btnPrev.addEventListener("click", goPrev);
   els.btnNext.addEventListener("click", goNext);
   els.btnSkip.addEventListener("click", skipCurrent);
